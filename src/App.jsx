@@ -7,7 +7,7 @@ import SpellCheckTab from './components/SpellCheck/SpellCheckTab';
 import ReviewTab from './components/Review/ReviewTab';
 import ArchiveTab from './components/Archive/ArchiveTab';
 
-import { extractMetadataWithAI, checkSpelling, reviewArticle } from './services/claudeApi';
+import { extractMetadataWithAI, checkSpelling, reviewArticle } from './services/aiApi';
 import { validatePageFile, validateArticleFile } from './utils/fileValidation';
 import { detectLanguage, sortArticlesByLanguage } from './utils/languageDetection';
 import { validatePdfRequirements, createIssue, generatePDF as generatePDFUtil } from './utils/pdfGenerator';
