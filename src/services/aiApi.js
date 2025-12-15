@@ -1,22 +1,22 @@
 /**
- * Claude API Service
- * Handles all interactions with Anthropic's Claude API
+ * OpenRouter API Service with DeepSeek R1 T2 Chimera
+ * Handles all interactions with OpenRouter API
  */
 
-const API_URL = "https://api.anthropic.com/v1/messages";
-const MODEL = "claude-sonnet-4-20250514";
+const API_URL = "https://openrouter.ai/api/v1/chat/completions";
+const MODEL = "tngtech/deepseek-r1t2-chimera:free";
 
 /**
- * Makes a request to Claude API
- * @param {string} prompt - The prompt to send to Claude
+ * Makes a request to OpenRouter API
+ * @param {string} prompt - The prompt to send to the AI
  * @param {number} maxTokens - Maximum tokens for the response
- * @returns {Promise<string>} - The response from Claude
+ * @returns {Promise<string>} - The response from the AI
  */
-const makeClaudeRequest = async (prompt, maxTokens = 1000) => {
-  const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY;
+const makeAIRequest = async (prompt, maxTokens = 1000) => {
+  const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY;
 
   if (!apiKey) {
-    throw new Error("API ключ Anthropic не найден. Добавьте VITE_ANTHROPIC_API_KEY в .env файл");
+    throw new Error("API ключ OpenRouter не найден. Добавьте VITE_OPENROUTER_API_KEY в .env файл");
   }
 
   try {
@@ -24,8 +24,9 @@ const makeClaudeRequest = async (prompt, maxTokens = 1000) => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01"
+        "Authorization": `Bearer ${apiKey}`,
+        "HTTP-Referer": window.location.origin,
+        "X-Title": "AI Journal Editor"
       },
       body: JSON.stringify({
         model: MODEL,
@@ -41,13 +42,13 @@ const makeClaudeRequest = async (prompt, maxTokens = 1000) => {
 
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(`Claude API error: ${errorData.error?.message || response.statusText}`);
+      throw new Error(`OpenRouter API error: ${errorData.error?.message || response.statusText}`);
     }
 
     const data = await response.json();
-    return data.content[0].text;
+    return data.choices[0].message.content;
   } catch (error) {
-    console.error("Claude API request failed:", error);
+    console.error("OpenRouter API request failed:", error);
     throw error;
   }
 };
@@ -73,7 +74,7 @@ ${content.substring(0, 2000)}
 }`;
 
   try {
-    const response = await makeClaudeRequest(prompt, 1000);
+    const response = await makeAIRequest(prompt, 1000);
     const cleanedResponse = response.replace(/```json|```/g, "").trim();
     const metadata = JSON.parse(cleanedResponse);
 
@@ -107,7 +108,7 @@ ${content.substring(0, 3000)}
 }`;
 
   try {
-    const response = await makeClaudeRequest(prompt, 2000);
+    const response = await makeAIRequest(prompt, 2000);
     const cleanedResponse = response.replace(/```json|```/g, "").trim();
     const result = JSON.parse(cleanedResponse);
 
@@ -153,7 +154,7 @@ ${content.substring(0, 4000)}
 }`;
 
   try {
-    const response = await makeClaudeRequest(prompt, 3000);
+    const response = await makeAIRequest(prompt, 3000);
     const cleanedResponse = response.replace(/```json|```/g, "").trim();
     const review = JSON.parse(cleanedResponse);
 
