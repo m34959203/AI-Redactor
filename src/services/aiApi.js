@@ -1,17 +1,20 @@
 /**
- * OpenRouter API Service with DeepSeek R1 T2 Chimera
- * Handles all interactions with OpenRouter API
+ * OpenRouter API Service with improved prompts
+ * Supports Russian, English, and Kazakh languages
  */
 
 const API_URL = "https://openrouter.ai/api/v1/chat/completions";
 const MODEL = "tngtech/deepseek-r1t2-chimera:free";
-// Fallback model if primary fails
 const FALLBACK_MODEL = "deepseek/deepseek-chat:free";
+
+// System prompt for consistent AI behavior
+const SYSTEM_PROMPT = `Ты - помощник редактора научного журнала.
+Ты анализируешь научные статьи на русском, английском и казахском языках.
+Всегда отвечай ТОЛЬКО в формате JSON без дополнительного текста.
+Не добавляй пояснения до или после JSON.`;
 
 /**
  * Extracts JSON from AI response that may contain <think> tags or other text
- * @param {string} response - Raw AI response
- * @returns {string} - Cleaned JSON string
  */
 const extractJsonFromResponse = (response) => {
   if (!response) return '{}';
@@ -35,11 +38,7 @@ const extractJsonFromResponse = (response) => {
 };
 
 /**
- * Makes a request to OpenRouter API
- * @param {string} prompt - The prompt to send to the AI
- * @param {number} maxTokens - Maximum tokens for the response
- * @param {boolean} useFallback - Whether to use fallback model
- * @returns {Promise<string>} - The response from the AI
+ * Makes a request to OpenRouter API with system prompt
  */
 const makeAIRequest = async (prompt, maxTokens = 1000, useFallback = false) => {
   const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY;
@@ -64,6 +63,10 @@ const makeAIRequest = async (prompt, maxTokens = 1000, useFallback = false) => {
         max_tokens: maxTokens,
         messages: [
           {
+            role: "system",
+            content: SYSTEM_PROMPT
+          },
+          {
             role: "user",
             content: prompt
           }
@@ -75,7 +78,6 @@ const makeAIRequest = async (prompt, maxTokens = 1000, useFallback = false) => {
       const errorData = await response.json().catch(() => ({}));
       const errorMessage = errorData.error?.message || response.statusText;
 
-      // If primary model fails, try fallback
       if (!useFallback && (response.status === 429 || response.status >= 500)) {
         console.warn(`Primary model failed (${response.status}), trying fallback...`);
         return makeAIRequest(prompt, maxTokens, true);
@@ -92,7 +94,6 @@ const makeAIRequest = async (prompt, maxTokens = 1000, useFallback = false) => {
 
     return data.choices[0].message.content;
   } catch (error) {
-    // Try fallback on network errors
     if (!useFallback && error.name === 'TypeError') {
       console.warn('Network error, trying fallback model...');
       return makeAIRequest(prompt, maxTokens, true);
@@ -105,9 +106,6 @@ const makeAIRequest = async (prompt, maxTokens = 1000, useFallback = false) => {
 
 /**
  * Safely parses JSON with fallback values
- * @param {string} jsonString - JSON string to parse
- * @param {Object} fallback - Fallback object if parsing fails
- * @returns {Object} - Parsed object or fallback
  */
 const safeJsonParse = (jsonString, fallback = {}) => {
   try {
@@ -121,26 +119,42 @@ const safeJsonParse = (jsonString, fallback = {}) => {
 
 /**
  * Extracts metadata (title and author) from article content using AI
- * @param {string} fileName - Name of the file
- * @param {string} content - Content of the article
- * @returns {Promise<{title: string, author: string}>}
+ * Supports Russian, English, and Kazakh articles
  */
 export const extractMetadataWithAI = async (fileName, content) => {
-  const prompt = `Проанализируй этот текст статьи и извлеки название и автора.
+  const prompt = `Извлеки метаданные из научной статьи.
 
-Текст файла "${fileName}":
-${content.substring(0, 2000)}
+ПРАВИЛА ИЗВЛЕЧЕНИЯ:
+1. Название статьи обычно в начале документа
+   - Может быть ЗАГЛАВНЫМИ БУКВАМИ
+   - Может быть на русском, английском или казахском языке
+2. Автор(ы) указаны после названия
+   - Формат: "Фамилия И.О." или "И.О. Фамилия" или "Surname N."
+   - Если несколько авторов - укажи только первого
+3. Если название или автор не найдены - верни null для этого поля
 
-Ответь ТОЛЬКО JSON без пояснений:
-{"title": "название статьи", "author": "ФИО автора"}`;
+ПРИМЕРЫ:
+Вход: "ВЛИЯНИЕ КЛИМАТА НА ЭКОСИСТЕМУ\\nИванов А.Б., Петров В.Г.\\nАннотация..."
+Выход: {"title": "Влияние климата на экосистему", "author": "Иванов А.Б."}
+
+Вход: "ҚАЗАҚСТАНДАҒЫ ЭКОЛОГИЯ МӘСЕЛЕЛЕРІ\\nСәрсенбаев Қ.М.\\nКіріспе..."
+Выход: {"title": "Қазақстандағы экология мәселелері", "author": "Сәрсенбаев Қ.М."}
+
+Вход: "CLIMATE CHANGE IMPACTS\\nSmith J., Brown A.\\nAbstract..."
+Выход: {"title": "Climate Change Impacts", "author": "Smith J."}
+
+ТЕКСТ СТАТЬИ (файл "${fileName}"):
+${content.substring(0, 2500)}
+
+Ответь JSON: {"title": "...", "author": "..."}`;
 
   const fallback = {
-    title: fileName.replace('.docx', ''),
-    author: 'Неизвестный автор'
+    title: fileName.replace('.docx', '').replace(/_/g, ' '),
+    author: 'Автор не указан'
   };
 
   try {
-    const response = await makeAIRequest(prompt, 500);
+    const response = await makeAIRequest(prompt, 600);
     const metadata = safeJsonParse(response, fallback);
 
     return {
@@ -155,29 +169,48 @@ ${content.substring(0, 2000)}
 
 /**
  * Checks spelling in the content using AI
- * @param {string} content - Content to check
- * @param {string} fileName - Name of the file
- * @returns {Promise<{fileName: string, errors: Array, totalErrors: number}>}
+ * Supports Russian, English, and Kazakh text
  */
 export const checkSpelling = async (content, fileName) => {
-  const prompt = `Проверь орфографию в тексте и найди ошибки.
+  const prompt = `Проверь орфографию в научном тексте.
 
-Текст:
-${content.substring(0, 3000)}
+ПРАВИЛА ПРОВЕРКИ:
+1. Поддерживаемые языки: русский, английский, казахский
+2. Игнорируй:
+   - Специальные термины и аббревиатуры (DNA, РНК, ЖИК)
+   - Имена собственные и названия
+   - Формулы и числа
+3. Найди до 15 самых явных орфографических ошибок
+4. Для каждой ошибки укажи контекст (3-5 слов вокруг)
 
-Ответь ТОЛЬКО JSON:
-{"errors": [{"word": "ошибка", "suggestion": "исправление", "context": "контекст"}], "totalErrors": 0}`;
+ПРИМЕР ОТВЕТА:
+{
+  "errors": [
+    {"word": "эксперемент", "suggestion": "эксперимент", "context": "...провести эксперемент в лаборатории..."},
+    {"word": "ресурс", "suggestion": "ресурсы", "context": "...природные ресурс истощаются..."}
+  ],
+  "totalErrors": 2
+}
+
+Если ошибок нет: {"errors": [], "totalErrors": 0}
+
+ТЕКСТ ДЛЯ ПРОВЕРКИ:
+${content.substring(0, 4000)}
+
+Ответь JSON:`;
 
   const fallback = { errors: [], totalErrors: 0 };
 
   try {
-    const response = await makeAIRequest(prompt, 1500);
+    const response = await makeAIRequest(prompt, 2000);
     const result = safeJsonParse(response, fallback);
 
     return {
       fileName,
       errors: Array.isArray(result.errors) ? result.errors : [],
-      totalErrors: typeof result.totalErrors === 'number' ? result.totalErrors : (result.errors?.length || 0)
+      totalErrors: typeof result.totalErrors === 'number'
+        ? result.totalErrors
+        : (result.errors?.length || 0)
     };
   } catch (error) {
     console.error("Spell check error:", error);
@@ -186,44 +219,56 @@ ${content.substring(0, 3000)}
 };
 
 /**
- * Reviews an article using AI
- * @param {string} content - Article content
- * @param {string} fileName - Name of the file
- * @returns {Promise<Object>} - Review result with scores and recommendations
+ * Reviews an article using AI with detailed scoring criteria
+ * Supports Russian, English, and Kazakh articles
  */
 export const reviewArticle = async (content, fileName) => {
-  const prompt = `Проведи рецензию научной статьи.
+  const prompt = `Проведи экспертную рецензию научной статьи.
 
-Текст:
-${content.substring(0, 4000)}
+ШКАЛА ОЦЕНОК (1-5):
+1 - Неприемлемо: критические недостатки, требует полной переработки
+2 - Слабо: существенные проблемы, много доработок
+3 - Удовлетворительно: есть замечания, требует правок
+4 - Хорошо: незначительные замечания
+5 - Отлично: соответствует высоким стандартам
 
-Оцени по критериям (1-5): структура, логика, оригинальность, стиль, актуальность.
+КРИТЕРИИ ОЦЕНКИ:
+1. СТРУКТУРА (structure): наличие введения, методологии, результатов, выводов
+2. ЛОГИКА (logic): последовательность аргументации, обоснованность выводов
+3. ОРИГИНАЛЬНОСТЬ (originality): новизна исследования, научный вклад
+4. СТИЛЬ (style): научный язык, терминология, грамотность
+5. АКТУАЛЬНОСТЬ (relevance): современность темы, практическая значимость
 
-Ответь ТОЛЬКО JSON:
+ПРИМЕР РЕЦЕНЗИИ:
 {
-  "structure": {"score": 3, "comment": "комментарий"},
-  "logic": {"score": 3, "comment": "комментарий"},
-  "originality": {"score": 3, "comment": "комментарий"},
-  "style": {"score": 3, "comment": "комментарий"},
-  "relevance": {"score": 3, "comment": "комментарий"},
-  "overallScore": 3,
-  "summary": "общий вывод",
-  "recommendations": ["рекомендация"]
-}`;
+  "structure": {"score": 4, "comment": "Структура соответствует требованиям, введение информативное"},
+  "logic": {"score": 3, "comment": "Выводы недостаточно обоснованы результатами"},
+  "originality": {"score": 4, "comment": "Предложен новый подход к решению проблемы"},
+  "style": {"score": 5, "comment": "Текст написан грамотным научным языком"},
+  "relevance": {"score": 4, "comment": "Тема актуальна для современной науки"},
+  "overallScore": 4,
+  "summary": "Статья соответствует требованиям научного журнала с небольшими доработками",
+  "recommendations": ["Усилить обоснование выводов", "Добавить больше ссылок на источники"]
+}
+
+ТЕКСТ СТАТЬИ (${fileName}):
+${content.substring(0, 5000)}
+
+Проведи рецензию и ответь JSON:`;
 
   const fallback = {
-    structure: { score: 3, comment: "Не удалось проанализировать" },
-    logic: { score: 3, comment: "Не удалось проанализировать" },
-    originality: { score: 3, comment: "Не удалось проанализировать" },
-    style: { score: 3, comment: "Не удалось проанализировать" },
-    relevance: { score: 3, comment: "Не удалось проанализировать" },
+    structure: { score: 3, comment: "Анализ недоступен" },
+    logic: { score: 3, comment: "Анализ недоступен" },
+    originality: { score: 3, comment: "Анализ недоступен" },
+    style: { score: 3, comment: "Анализ недоступен" },
+    relevance: { score: 3, comment: "Анализ недоступен" },
     overallScore: 3,
     summary: "Не удалось создать рецензию. Попробуйте позже.",
     recommendations: []
   };
 
   try {
-    const response = await makeAIRequest(prompt, 2000);
+    const response = await makeAIRequest(prompt, 2500);
     const review = safeJsonParse(response, null);
 
     if (!review || !review.structure) {
@@ -231,22 +276,40 @@ ${content.substring(0, 4000)}
       return { fileName, ...fallback };
     }
 
-    // Validate and normalize the review
+    // Validate and normalize scores (clamp to 1-5)
+    const clampScore = (score) => Math.max(1, Math.min(5, Number(score) || 3));
+
     const normalizedReview = {
-      structure: review.structure || fallback.structure,
-      logic: review.logic || fallback.logic,
-      originality: review.originality || fallback.originality,
-      style: review.style || fallback.style,
-      relevance: review.relevance || fallback.relevance,
-      overallScore: typeof review.overallScore === 'number' ? review.overallScore : 3,
+      structure: {
+        score: clampScore(review.structure?.score),
+        comment: review.structure?.comment || fallback.structure.comment
+      },
+      logic: {
+        score: clampScore(review.logic?.score),
+        comment: review.logic?.comment || fallback.logic.comment
+      },
+      originality: {
+        score: clampScore(review.originality?.score),
+        comment: review.originality?.comment || fallback.originality.comment
+      },
+      style: {
+        score: clampScore(review.style?.score),
+        comment: review.style?.comment || fallback.style.comment
+      },
+      relevance: {
+        score: clampScore(review.relevance?.score),
+        comment: review.relevance?.comment || fallback.relevance.comment
+      },
+      overallScore: clampScore(review.overallScore),
       summary: review.summary || fallback.summary,
-      recommendations: Array.isArray(review.recommendations) ? review.recommendations : []
+      recommendations: Array.isArray(review.recommendations)
+        ? review.recommendations.filter(r => r && typeof r === 'string')
+        : []
     };
 
     return { fileName, ...normalizedReview };
   } catch (error) {
     console.error("Review error:", error);
-    // Return fallback instead of throwing
     return { fileName, ...fallback };
   }
 };

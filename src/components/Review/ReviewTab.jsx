@@ -1,8 +1,11 @@
 import React from 'react';
 import { Eye, Download, FileText } from 'lucide-react';
 import { generateReviewPDF, downloadPDF } from '../../utils/pdfGenerator';
+import { useNotifications } from '../../context/AppContext';
 
 const ReviewTab = ({ articles, reviewResult, onReviewArticle }) => {
+  const { showSuccess, showError } = useNotifications();
+
   const handleExportPDF = () => {
     if (!reviewResult) return;
 
@@ -10,9 +13,10 @@ const ReviewTab = ({ articles, reviewResult, onReviewArticle }) => {
       const pdfBlob = generateReviewPDF(reviewResult);
       const fileName = `review_${reviewResult.fileName.replace(/\.[^/.]+$/, '')}_${new Date().toISOString().split('T')[0]}.pdf`;
       downloadPDF(pdfBlob, fileName);
+      showSuccess('Рецензия экспортирована в PDF');
     } catch (error) {
       console.error('Error exporting review:', error);
-      alert('Ошибка при экспорте рецензии в PDF');
+      showError('Ошибка при экспорте рецензии в PDF');
     }
   };
 

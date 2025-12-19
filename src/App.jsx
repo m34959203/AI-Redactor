@@ -1,37 +1,39 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import Header from './components/UI/Header';
 import Tabs from './components/UI/Tabs';
 import LoadingOverlay from './components/UI/LoadingOverlay';
+import ToastContainer from './components/UI/Toast';
+import Onboarding from './components/UI/Onboarding';
 import EditorTab from './components/Editor/EditorTab';
 import SpellCheckTab from './components/SpellCheck/SpellCheckTab';
 import ReviewTab from './components/Review/ReviewTab';
 import ArchiveTab from './components/Archive/ArchiveTab';
 
+import { useApp, useNotifications, useProcessing } from './context/AppContext';
 import { extractMetadataWithAI, checkSpelling, reviewArticle } from './services/aiApi';
 import { validatePageFile, validateArticleFile } from './utils/fileValidation';
 import { detectLanguage, sortArticlesByLanguage } from './utils/languageDetection';
 import { validatePdfRequirements, createIssue, generatePDF, downloadPDF } from './utils/pdfGenerator';
 import { convertDocxToText } from './utils/docxConverter';
-import {
-  loadArchiveMetadata,
-  addToArchive,
-  getPdfBlob,
-  removeFromArchive
-} from './utils/archiveStorage';
+import { addToArchive, getPdfBlob, removeFromArchive } from './utils/archiveStorage';
 
 const App = () => {
-  // State
-  const [articles, setArticles] = useState([]);
-  const [coverPage, setCoverPage] = useState(null);
-  const [descriptionPage, setDescriptionPage] = useState(null);
-  const [finalPage, setFinalPage] = useState(null);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [processingMessage, setProcessingMessage] = useState('');
-  const [activeTab, setActiveTab] = useState('editor');
-  const [archive, setArchive] = useState([]);
-  const [editingArticle, setEditingArticle] = useState(null);
-  const [spellCheckResults, setSpellCheckResults] = useState([]);
-  const [reviewResult, setReviewResult] = useState(null);
+  const { state, actions } = useApp();
+  const { notifications, showSuccess, showError, removeNotification } = useNotifications();
+  const { isProcessing, processingMessage, setProcessing } = useProcessing();
+
+  const {
+    articles,
+    coverPage,
+    descriptionPage,
+    finalPage,
+    activeTab,
+    archive,
+    editingArticle,
+    spellCheckResults,
+    reviewResult,
+    hasSeenOnboarding,
+  } = state;
 
   // Refs
   const fileInputRef = useRef(null);
@@ -39,25 +41,18 @@ const App = () => {
   const descInputRef = useRef(null);
   const finalInputRef = useRef(null);
 
-  // Load archive from storage on mount
-  useEffect(() => {
-    const savedArchive = loadArchiveMetadata();
-    setArchive(savedArchive);
-  }, []);
-
   // Special page upload handlers
   const handleSpecialPageUpload = async (file, type) => {
     if (!file) {
-      // Handle deletion
       switch (type) {
         case 'cover':
-          setCoverPage(null);
+          actions.setCoverPage(null);
           break;
         case 'description':
-          setDescriptionPage(null);
+          actions.setDescriptionPage(null);
           break;
         case 'final':
-          setFinalPage(null);
+          actions.setFinalPage(null);
           break;
       }
       return;
@@ -65,7 +60,7 @@ const App = () => {
 
     const validation = validatePageFile(file);
     if (!validation.valid) {
-      alert(validation.error);
+      showError(validation.error);
       return;
     }
 
@@ -79,28 +74,30 @@ const App = () => {
 
     switch (type) {
       case 'cover':
-        setCoverPage(pageData);
+        actions.setCoverPage(pageData);
+        showSuccess('Титульный лист загружен');
         break;
       case 'description':
-        setDescriptionPage(pageData);
+        actions.setDescriptionPage(pageData);
+        showSuccess('Описание журнала загружено');
         break;
       case 'final':
-        setFinalPage(pageData);
+        actions.setFinalPage(pageData);
+        showSuccess('Заключительная страница загружена');
         break;
     }
   };
 
   // Articles upload handler
   const handleArticlesUpload = async (files) => {
-    setIsProcessing(true);
-    setProcessingMessage('Загрузка статей...');
+    setProcessing(true, 'Загрузка статей...');
     const newArticles = [];
     const spellChecks = [];
 
     try {
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
-        setProcessingMessage(`Обработка файла ${i + 1}/${files.length}: ${file.name}`);
+        setProcessing(true, `Обработка файла ${i + 1}/${files.length}: ${file.name}`);
 
         const validation = validateArticleFile(file);
         if (!validation.valid) {
@@ -108,16 +105,15 @@ const App = () => {
           continue;
         }
 
-        // Extract text content from DOCX
         let content;
         try {
           content = await convertDocxToText(file);
         } catch (error) {
           console.error('Error extracting text:', error);
-          content = await file.text(); // Fallback
+          content = await file.text();
         }
 
-        setProcessingMessage(`AI анализ: ${file.name}`);
+        setProcessing(true, `AI анализ: ${file.name}`);
         const metadata = await extractMetadataWithAI(file.name, content);
         const language = detectLanguage(metadata.author);
 
@@ -132,8 +128,7 @@ const App = () => {
 
         newArticles.push(article);
 
-        // Spell check
-        setProcessingMessage(`Проверка орфографии: ${file.name}`);
+        setProcessing(true, `Проверка орфографии: ${file.name}`);
         const spellCheck = await checkSpelling(content, file.name);
         spellChecks.push(spellCheck);
       }
@@ -141,41 +136,38 @@ const App = () => {
       const allArticles = [...articles, ...newArticles];
       const sortedArticles = sortArticlesByLanguage(allArticles);
 
-      setArticles(sortedArticles);
-      setSpellCheckResults((prev) => [...prev, ...spellChecks]);
+      actions.setArticles(sortedArticles);
+      actions.addSpellCheckResults(spellChecks);
+
+      showSuccess(`Загружено ${newArticles.length} статей`);
     } catch (error) {
       console.error('Error uploading articles:', error);
-      alert('Ошибка при загрузке статей: ' + error.message);
+      showError('Ошибка при загрузке статей: ' + error.message);
     } finally {
-      setIsProcessing(false);
-      setProcessingMessage('');
+      setProcessing(false);
     }
   };
 
   // Article management
   const updateArticle = (id, field, value) => {
-    setArticles((prev) => {
-      const updated = prev.map((a) => {
-        if (a.id === id) {
-          const updatedArticle = { ...a, [field]: value };
-          if (field === 'author') {
-            updatedArticle.language = detectLanguage(value);
-          }
-          return updatedArticle;
-        }
-        return a;
-      });
+    const updates = { [field]: value };
+    if (field === 'author') {
+      updates.language = detectLanguage(value);
+    }
+    actions.updateArticle(id, updates);
 
-      // Re-sort if author changed
-      if (field === 'author') {
-        return sortArticlesByLanguage(updated);
-      }
-      return updated;
-    });
+    // Re-sort if author changed
+    if (field === 'author') {
+      const updated = articles.map((a) =>
+        a.id === id ? { ...a, ...updates } : a
+      );
+      actions.setArticles(sortArticlesByLanguage(updated));
+    }
   };
 
   const deleteArticle = (id) => {
-    setArticles((prev) => prev.filter((a) => a.id !== id));
+    actions.deleteArticle(id);
+    showSuccess('Статья удалена');
   };
 
   // PDF Generation
@@ -183,21 +175,20 @@ const App = () => {
     const validation = validatePdfRequirements(coverPage, descriptionPage, finalPage);
 
     if (!validation.valid) {
-      alert('Загрузите все необходимые страницы:\n' + validation.missingPages.join('\n'));
+      showError('Загрузите все необходимые страницы:\n' + validation.missingPages.join(', '));
       return;
     }
 
     if (articles.length === 0) {
-      alert('Загрузите хотя бы одну статью');
+      showError('Загрузите хотя бы одну статью');
       return;
     }
 
-    setIsProcessing(true);
+    setProcessing(true, 'Генерация PDF...');
 
     try {
       const issue = createIssue(articles, coverPage, descriptionPage, finalPage);
 
-      // Generate PDF with progress
       const pdfBlob = await generatePDF(
         issue,
         articles,
@@ -205,110 +196,102 @@ const App = () => {
         descriptionPage,
         finalPage,
         (progress) => {
-          setProcessingMessage(progress.message);
+          setProcessing(true, progress.message);
         }
       );
 
-      // Save to archive
       const archivedIssue = await addToArchive(issue, pdfBlob);
-      setArchive((prev) => [...prev, archivedIssue]);
+      actions.addToArchive(archivedIssue);
 
-      // Download the PDF
       downloadPDF(pdfBlob, `${issue.name.replace(/\s+/g, '_')}.pdf`);
 
-      alert(
-        `PDF успешно сгенерирован и сохранён в архив!\n\nСтруктура выпуска:\n1. Титульный лист\n2. Описание журнала\n3. ${articles.length} статей (с 4 пустыми строками между ними)\n4. Содержание\n5. Заключительная страница\n\nФайл автоматически скачан.`
-      );
+      showSuccess(`PDF успешно сгенерирован! ${articles.length} статей в выпуске.`);
     } catch (error) {
       console.error('Error generating PDF:', error);
-      alert('Ошибка при генерации PDF: ' + error.message);
+      showError('Ошибка при генерации PDF: ' + error.message);
     } finally {
-      setIsProcessing(false);
-      setProcessingMessage('');
+      setProcessing(false);
     }
   };
 
   // Archive handlers
   const handleDownloadFromArchive = async (issueId) => {
-    setIsProcessing(true);
-    setProcessingMessage('Загрузка PDF из архива...');
+    setProcessing(true, 'Загрузка PDF из архива...');
 
     try {
       const pdfBlob = await getPdfBlob(issueId);
       if (pdfBlob) {
-        const issue = archive.find(i => i.id === issueId);
+        const issue = archive.find((i) => i.id === issueId);
         const fileName = issue ? `${issue.name.replace(/\s+/g, '_')}.pdf` : 'journal.pdf';
         downloadPDF(pdfBlob, fileName);
+        showSuccess('Файл скачан');
       } else {
-        alert('PDF файл не найден в архиве');
+        showError('PDF файл не найден в архиве');
       }
     } catch (error) {
       console.error('Error downloading from archive:', error);
-      alert('Ошибка при загрузке из архива');
+      showError('Ошибка при загрузке из архива');
     } finally {
-      setIsProcessing(false);
-      setProcessingMessage('');
+      setProcessing(false);
     }
   };
 
   const handleViewFromArchive = async (issueId) => {
-    setIsProcessing(true);
-    setProcessingMessage('Открытие PDF...');
+    setProcessing(true, 'Открытие PDF...');
 
     try {
       const pdfBlob = await getPdfBlob(issueId);
       if (pdfBlob) {
         const url = URL.createObjectURL(pdfBlob);
         window.open(url, '_blank');
-        // Clean up after a delay
         setTimeout(() => URL.revokeObjectURL(url), 60000);
       } else {
-        alert('PDF файл не найден в архиве');
+        showError('PDF файл не найден в архиве');
       }
     } catch (error) {
       console.error('Error viewing from archive:', error);
-      alert('Ошибка при открытии PDF');
+      showError('Ошибка при открытии PDF');
     } finally {
-      setIsProcessing(false);
-      setProcessingMessage('');
+      setProcessing(false);
     }
   };
 
   const handleDeleteFromArchive = async (issueId) => {
-    if (!confirm('Вы уверены, что хотите удалить этот выпуск из архива?')) {
-      return;
-    }
-
     try {
       await removeFromArchive(issueId);
-      setArchive((prev) => prev.filter(i => i.id !== issueId));
+      actions.removeFromArchive(issueId);
+      showSuccess('Выпуск удалён из архива');
     } catch (error) {
       console.error('Error deleting from archive:', error);
-      alert('Ошибка при удалении из архива');
+      showError('Ошибка при удалении из архива');
     }
   };
 
   // Review handler
   const handleReviewArticle = async (content, fileName) => {
-    setIsProcessing(true);
-    setProcessingMessage('Генерация рецензии...');
+    setProcessing(true, 'Генерация рецензии...');
     try {
       const review = await reviewArticle(content, fileName);
-      setReviewResult(review);
+      actions.setReviewResult(review);
+      showSuccess('Рецензия готова');
     } catch (error) {
       console.error('Review error:', error);
-      alert('Ошибка при создании рецензии');
+      showError('Ошибка при создании рецензии');
     } finally {
-      setIsProcessing(false);
-      setProcessingMessage('');
+      setProcessing(false);
     }
+  };
+
+  // Handle onboarding complete
+  const handleOnboardingComplete = () => {
+    actions.setOnboardingSeen();
   };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
       <div className="container mx-auto p-6 max-w-7xl">
         <Header articlesCount={articles.length} />
-        <Tabs activeTab={activeTab} setActiveTab={setActiveTab} />
+        <Tabs activeTab={activeTab} setActiveTab={actions.setActiveTab} />
 
         {activeTab === 'editor' && (
           <EditorTab
@@ -322,10 +305,10 @@ const App = () => {
             onDescriptionUpload={(file) => handleSpecialPageUpload(file, 'description')}
             onFinalUpload={(file) => handleSpecialPageUpload(file, 'final')}
             onArticlesUpload={handleArticlesUpload}
-            onEditArticle={setEditingArticle}
+            onEditArticle={actions.setEditingArticle}
             onUpdateArticle={updateArticle}
             onDeleteArticle={deleteArticle}
-            onStopEditing={() => setEditingArticle(null)}
+            onStopEditing={() => actions.setEditingArticle(null)}
             onGeneratePDF={handleGeneratePDF}
             fileInputRef={fileInputRef}
             coverInputRef={coverInputRef}
@@ -357,6 +340,17 @@ const App = () => {
 
         {isProcessing && <LoadingOverlay message={processingMessage} />}
       </div>
+
+      {/* Toast notifications */}
+      <ToastContainer
+        notifications={notifications}
+        removeNotification={removeNotification}
+      />
+
+      {/* Onboarding for new users */}
+      {!hasSeenOnboarding && (
+        <Onboarding onComplete={handleOnboardingComplete} />
+      )}
     </div>
   );
 };
