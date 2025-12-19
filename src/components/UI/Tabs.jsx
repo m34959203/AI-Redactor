@@ -1,12 +1,13 @@
 import React from 'react';
-import { Edit2, CheckCircle, Eye, FileText } from 'lucide-react';
+import { Edit2, CheckCircle, Eye, FileText, BookOpen } from 'lucide-react';
 
 const Tabs = ({ activeTab, setActiveTab }) => {
   const tabs = [
     { id: 'editor', label: 'Редактор', icon: Edit2 },
-    { id: 'spellcheck', label: 'Проверка орфографии', icon: CheckCircle },
+    { id: 'spellcheck', label: 'Орфография', icon: CheckCircle },
     { id: 'review', label: 'Рецензия', icon: Eye },
     { id: 'archive', label: 'Архив', icon: FileText },
+    { id: 'info', label: 'О журнале', icon: BookOpen },
   ];
 
   return (

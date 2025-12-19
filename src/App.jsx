@@ -8,6 +8,7 @@ import EditorTab from './components/Editor/EditorTab';
 import SpellCheckTab from './components/SpellCheck/SpellCheckTab';
 import ReviewTab from './components/Review/ReviewTab';
 import ArchiveTab from './components/Archive/ArchiveTab';
+import InfoTab from './components/Info/InfoTab';
 
 import { useApp, useNotifications, useProcessing } from './context/AppContext';
 import { extractMetadataWithAI, checkSpelling, reviewArticle } from './services/aiApi';
@@ -347,6 +348,8 @@ const App = () => {
             onDelete={handleDeleteFromArchive}
           />
         )}
+
+        {activeTab === 'info' && <InfoTab />}
 
         {isProcessing && (
           <LoadingOverlay
