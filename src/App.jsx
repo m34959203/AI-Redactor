@@ -91,20 +91,24 @@ const App = () => {
   // Articles upload handler
   const handleArticlesUpload = async (files) => {
     const totalFiles = files.length;
-    setProcessing(true, 'Загрузка статей...', 0, totalFiles);
+    // 3 steps per file: read, AI analysis, spell check
+    const totalSteps = totalFiles * 3;
+    let currentStep = 0;
+    setProcessing(true, 'Загрузка статей...', currentStep, totalSteps);
     const newArticles = [];
     const spellChecks = [];
 
     try {
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
-        const currentFile = i + 1;
+        const fileNum = i + 1;
 
-        setProcessing(true, `Чтение: ${file.name}`, currentFile, totalFiles);
+        setProcessing(true, `[${fileNum}/${totalFiles}] Чтение: ${file.name}`, currentStep, totalSteps);
 
         const validation = validateArticleFile(file);
         if (!validation.valid) {
           console.warn(`Skipping file ${file.name}: ${validation.error}`);
+          currentStep += 3; // Skip all 3 steps for this file
           continue;
         }
 
@@ -115,10 +119,12 @@ const App = () => {
           console.error('Error extracting text:', error);
           content = await file.text();
         }
+        currentStep++;
 
-        setProcessing(true, `AI анализ: ${file.name}`, currentFile, totalFiles);
+        setProcessing(true, `[${fileNum}/${totalFiles}] AI анализ: ${file.name}`, currentStep, totalSteps);
         const metadata = await extractMetadataWithAI(file.name, content);
         const language = detectLanguage(metadata.author);
+        currentStep++;
 
         const article = {
           id: Date.now() + Math.random(),
@@ -131,9 +137,10 @@ const App = () => {
 
         newArticles.push(article);
 
-        setProcessing(true, `Орфография: ${file.name}`, currentFile, totalFiles);
+        setProcessing(true, `[${fileNum}/${totalFiles}] Орфография: ${file.name}`, currentStep, totalSteps);
         const spellCheck = await checkSpelling(content, file.name);
         spellChecks.push(spellCheck);
+        currentStep++;
       }
 
       const allArticles = [...articles, ...newArticles];
