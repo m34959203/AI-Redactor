@@ -1,19 +1,28 @@
 /**
  * Cyrillic font loader for jsPDF
- * Loads PT Sans font from CDN and registers it with jsPDF
+ * Loads PT Serif font (Times New Roman-like) for academic journals
  */
 
-// Font URLs (PT Sans - popular Russian font, supports Cyrillic)
+// Font URLs (PT Serif - similar to Times New Roman, supports Cyrillic)
 const FONT_URLS = {
+  regular: 'https://cdn.jsdelivr.net/gh/nickmessing/jsPDF-CustomFonts-support@master/fonts/PTSerif_regular.ttf',
+  bold: 'https://cdn.jsdelivr.net/gh/nickmessing/jsPDF-CustomFonts-support@master/fonts/PTSerif_bold.ttf',
+  italic: 'https://cdn.jsdelivr.net/gh/nickmessing/jsPDF-CustomFonts-support@master/fonts/PTSerif_italic.ttf',
+};
+
+// Fallback to PT Sans if PT Serif not available
+const FALLBACK_URLS = {
   regular: 'https://cdn.jsdelivr.net/gh/nickmessing/jsPDF-CustomFonts-support@master/fonts/PTSans_normal.ttf',
   bold: 'https://cdn.jsdelivr.net/gh/nickmessing/jsPDF-CustomFonts-support@master/fonts/PTSans_bold.ttf',
 };
 
 // Cache for loaded fonts
 let fontsLoaded = false;
+let fontName = 'times'; // Default to times, will be set to PTSerif if loaded
 let fontData = {
   regular: null,
   bold: null,
+  italic: null,
 };
 
 /**
@@ -40,7 +49,7 @@ const loadFontFromUrl = async (url) => {
     const arrayBuffer = await response.arrayBuffer();
     return arrayBufferToBase64(arrayBuffer);
   } catch (error) {
-    console.error('Error loading font:', error);
+    console.error('Error loading font from:', url, error);
     return null;
   }
 };
@@ -52,16 +61,31 @@ export const preloadFonts = async () => {
   if (fontsLoaded) return true;
 
   try {
-    const [regular, bold] = await Promise.all([
+    // Try PT Serif first (Times-like)
+    let [regular, bold, italic] = await Promise.all([
       loadFontFromUrl(FONT_URLS.regular),
       loadFontFromUrl(FONT_URLS.bold),
+      loadFontFromUrl(FONT_URLS.italic),
     ]);
+
+    // Fallback to PT Sans if PT Serif failed
+    if (!regular) {
+      console.warn('PT Serif not available, trying PT Sans fallback...');
+      [regular, bold] = await Promise.all([
+        loadFontFromUrl(FALLBACK_URLS.regular),
+        loadFontFromUrl(FALLBACK_URLS.bold),
+      ]);
+      fontName = 'PTSans';
+    } else {
+      fontName = 'PTSerif';
+    }
 
     fontData.regular = regular;
     fontData.bold = bold;
+    fontData.italic = italic;
     fontsLoaded = regular !== null;
 
-    console.log('Cyrillic fonts loaded:', fontsLoaded);
+    console.log('Cyrillic fonts loaded:', fontsLoaded, 'Font:', fontName);
     return fontsLoaded;
   } catch (error) {
     console.error('Failed to preload fonts:', error);
@@ -86,17 +110,24 @@ export const registerCyrillicFont = async (doc) => {
   }
 
   try {
-    // Add font to virtual file system
-    doc.addFileToVFS('PTSans-Regular.ttf', fontData.regular);
-    doc.addFont('PTSans-Regular.ttf', 'PTSans', 'normal');
+    // Add regular font
+    doc.addFileToVFS(`${fontName}-Regular.ttf`, fontData.regular);
+    doc.addFont(`${fontName}-Regular.ttf`, fontName, 'normal');
 
+    // Add bold font
     if (fontData.bold) {
-      doc.addFileToVFS('PTSans-Bold.ttf', fontData.bold);
-      doc.addFont('PTSans-Bold.ttf', 'PTSans', 'bold');
+      doc.addFileToVFS(`${fontName}-Bold.ttf`, fontData.bold);
+      doc.addFont(`${fontName}-Bold.ttf`, fontName, 'bold');
+    }
+
+    // Add italic font (for PT Serif)
+    if (fontData.italic) {
+      doc.addFileToVFS(`${fontName}-Italic.ttf`, fontData.italic);
+      doc.addFont(`${fontName}-Italic.ttf`, fontName, 'italic');
     }
 
     // Set as default font
-    doc.setFont('PTSans', 'normal');
+    doc.setFont(fontName, 'normal');
 
     return true;
   } catch (error) {
@@ -106,11 +137,11 @@ export const registerCyrillicFont = async (doc) => {
 };
 
 /**
- * Gets the font name to use (PTSans if available, helvetica fallback)
+ * Gets the font name to use (PTSerif/PTSans if available, times fallback)
  * @returns {string} - Font name
  */
 export const getFontName = () => {
-  return fontsLoaded ? 'PTSans' : 'helvetica';
+  return fontsLoaded ? fontName : 'times';
 };
 
 /**

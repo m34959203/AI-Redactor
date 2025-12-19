@@ -5,15 +5,16 @@ import { jsPDF } from 'jspdf';
 import { convertDocxToHtml, readFileAsArrayBuffer } from './docxConverter';
 import { registerCyrillicFont, getFontName, preloadFonts } from './fontLoader';
 
-// Constants
+// Constants (based on "Вестник ЖезУ" journal requirements)
 const PAGE_WIDTH = 210; // A4 width in mm
 const PAGE_HEIGHT = 297; // A4 height in mm
-const MARGIN_LEFT = 20;
-const MARGIN_RIGHT = 20;
-const MARGIN_TOP = 25;
-const MARGIN_BOTTOM = 25;
+const MARGIN_LEFT = 25; // 2.5 cm
+const MARGIN_RIGHT = 25; // 2.5 cm
+const MARGIN_TOP = 30; // 3 cm
+const MARGIN_BOTTOM = 30; // 3 cm
 const CONTENT_WIDTH = PAGE_WIDTH - MARGIN_LEFT - MARGIN_RIGHT;
-const LINE_HEIGHT = 7;
+const LINE_HEIGHT = 6; // For 12pt font with single spacing
+const FONT_SIZE = 12; // Times New Roman 12pt as per requirements
 const EMPTY_LINES_BEFORE_ARTICLE = 4;
 
 // Preload fonts at module load
@@ -143,7 +144,7 @@ const renderHtmlToPdf = (doc, html, startY, startPage) => {
   let currentY = startY;
   let currentPage = startPage;
 
-  doc.setFontSize(11);
+  doc.setFontSize(FONT_SIZE);
 
   const paragraphs = text.split(/\n\n+/);
 
