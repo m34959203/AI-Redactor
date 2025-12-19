@@ -3,6 +3,7 @@
  */
 import { jsPDF } from 'jspdf';
 import { convertDocxToHtml, readFileAsArrayBuffer } from './docxConverter';
+import { registerCyrillicFont, getFontName, preloadFonts } from './fontLoader';
 
 // Constants
 const PAGE_WIDTH = 210; // A4 width in mm
@@ -14,6 +15,9 @@ const MARGIN_BOTTOM = 25;
 const CONTENT_WIDTH = PAGE_WIDTH - MARGIN_LEFT - MARGIN_RIGHT;
 const LINE_HEIGHT = 7;
 const EMPTY_LINES_BEFORE_ARTICLE = 4;
+
+// Preload fonts at module load
+preloadFonts();
 
 /**
  * Validates if all required pages are uploaded
@@ -66,10 +70,14 @@ export const createIssue = (articles, coverPage, descriptionPage, finalPage) => 
 /**
  * Adds Cyrillic font support to jsPDF
  * @param {jsPDF} doc - jsPDF instance
+ * @returns {Promise<void>}
  */
-const setupCyrillicFont = (doc) => {
-  // Use built-in helvetica as fallback, but we'll handle Cyrillic text carefully
-  doc.setFont('helvetica');
+const setupCyrillicFont = async (doc) => {
+  const success = await registerCyrillicFont(doc);
+  if (!success) {
+    console.warn('Using fallback font (helvetica) - Cyrillic may not display correctly');
+    doc.setFont('helvetica');
+  }
 };
 
 /**
@@ -206,15 +214,16 @@ const generateTableOfContents = (doc, tocEntries, startPage) => {
   doc.addPage();
   let currentY = MARGIN_TOP;
   let currentPage = startPage;
+  const fontName = getFontName();
 
   // Title
   doc.setFontSize(16);
-  doc.setFont('helvetica', 'bold');
+  doc.setFont(fontName, 'bold');
   doc.text('СОДЕРЖАНИЕ', PAGE_WIDTH / 2, currentY, { align: 'center' });
   currentY += LINE_HEIGHT * 2;
 
   doc.setFontSize(11);
-  doc.setFont('helvetica', 'normal');
+  doc.setFont(fontName, 'normal');
 
   for (let i = 0; i < tocEntries.length; i++) {
     const entry = tocEntries[i];
@@ -268,7 +277,9 @@ export const generatePDF = async (issue, articles, coverPage, descriptionPage, f
     format: 'a4'
   });
 
-  setupCyrillicFont(doc);
+  // Setup Cyrillic font support
+  onProgress({ step: 0, total: 0, message: 'Загрузка шрифтов...' });
+  await setupCyrillicFont(doc);
 
   let currentPage = 1;
   const tocEntries = [];
@@ -307,9 +318,11 @@ export const generatePDF = async (issue, articles, coverPage, descriptionPage, f
       // Record page for TOC
       const articleStartPage = currentPage;
 
+      const fontName = getFontName();
+
       // Article header
       doc.setFontSize(14);
-      doc.setFont('helvetica', 'bold');
+      doc.setFont(fontName, 'bold');
       const titleLines = splitTextToLines(doc, article.title, CONTENT_WIDTH);
       for (const line of titleLines) {
         doc.text(line, MARGIN_LEFT, startY);
@@ -318,11 +331,13 @@ export const generatePDF = async (issue, articles, coverPage, descriptionPage, f
 
       // Author
       doc.setFontSize(11);
-      doc.setFont('helvetica', 'italic');
+      doc.setFont(fontName, 'normal');
+      doc.setTextColor(80, 80, 80);
       doc.text(article.author, MARGIN_LEFT, startY);
+      doc.setTextColor(0, 0, 0);
       startY += LINE_HEIGHT * 2;
 
-      doc.setFont('helvetica', 'normal');
+      doc.setFont(fontName, 'normal');
 
       // Article content
       if (article.file) {
@@ -387,26 +402,30 @@ export const downloadPDF = (pdfBlob, fileName) => {
 /**
  * Generates PDF for a review report
  * @param {Object} review - Review data
- * @returns {Blob} - PDF blob
+ * @returns {Promise<Blob>} - PDF blob
  */
-export const generateReviewPDF = (review) => {
+export const generateReviewPDF = async (review) => {
   const doc = new jsPDF({
     orientation: 'portrait',
     unit: 'mm',
     format: 'a4'
   });
 
+  // Setup Cyrillic font
+  await setupCyrillicFont(doc);
+  const fontName = getFontName();
+
   let currentY = MARGIN_TOP;
 
   // Title
   doc.setFontSize(18);
-  doc.setFont('helvetica', 'bold');
+  doc.setFont(fontName, 'bold');
   doc.text('РЕЦЕНЗИЯ НА СТАТЬЮ', PAGE_WIDTH / 2, currentY, { align: 'center' });
   currentY += LINE_HEIGHT * 2;
 
   // File name
   doc.setFontSize(12);
-  doc.setFont('helvetica', 'normal');
+  doc.setFont(fontName, 'normal');
   doc.text(`Файл: ${review.fileName}`, MARGIN_LEFT, currentY);
   currentY += LINE_HEIGHT;
   doc.text(`Дата: ${new Date().toLocaleDateString('ru-RU')}`, MARGIN_LEFT, currentY);
@@ -422,7 +441,7 @@ export const generateReviewPDF = (review) => {
   ];
 
   doc.setFontSize(14);
-  doc.setFont('helvetica', 'bold');
+  doc.setFont(fontName, 'bold');
   doc.text('Оценки по критериям:', MARGIN_LEFT, currentY);
   currentY += LINE_HEIGHT * 1.5;
 
@@ -431,11 +450,11 @@ export const generateReviewPDF = (review) => {
     const score = review[key]?.score || '-';
     const comment = review[key]?.comment || '';
 
-    doc.setFont('helvetica', 'bold');
+    doc.setFont(fontName, 'bold');
     doc.text(`${label}: ${score}/5`, MARGIN_LEFT, currentY);
     currentY += LINE_HEIGHT;
 
-    doc.setFont('helvetica', 'normal');
+    doc.setFont(fontName, 'normal');
     const commentLines = splitTextToLines(doc, comment, CONTENT_WIDTH - 10);
     for (const line of commentLines) {
       doc.text(`  ${line}`, MARGIN_LEFT, currentY);
@@ -447,7 +466,7 @@ export const generateReviewPDF = (review) => {
   // Overall score
   currentY += LINE_HEIGHT;
   doc.setFontSize(14);
-  doc.setFont('helvetica', 'bold');
+  doc.setFont(fontName, 'bold');
   doc.text(`Общая оценка: ${review.overallScore}/5`, MARGIN_LEFT, currentY);
   currentY += LINE_HEIGHT * 2;
 
@@ -456,7 +475,7 @@ export const generateReviewPDF = (review) => {
   doc.text('Заключение:', MARGIN_LEFT, currentY);
   currentY += LINE_HEIGHT;
 
-  doc.setFont('helvetica', 'normal');
+  doc.setFont(fontName, 'normal');
   doc.setFontSize(11);
   const summaryLines = splitTextToLines(doc, review.summary || '', CONTENT_WIDTH);
   for (const line of summaryLines) {
@@ -468,12 +487,12 @@ export const generateReviewPDF = (review) => {
   if (review.recommendations && review.recommendations.length > 0) {
     currentY += LINE_HEIGHT;
     doc.setFontSize(12);
-    doc.setFont('helvetica', 'bold');
+    doc.setFont(fontName, 'bold');
     doc.text('Рекомендации:', MARGIN_LEFT, currentY);
     currentY += LINE_HEIGHT;
 
     doc.setFontSize(11);
-    doc.setFont('helvetica', 'normal');
+    doc.setFont(fontName, 'normal');
     review.recommendations.forEach((rec, idx) => {
       const recLines = splitTextToLines(doc, `${idx + 1}. ${rec}`, CONTENT_WIDTH - 5);
       for (const line of recLines) {
