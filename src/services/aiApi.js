@@ -44,7 +44,7 @@ const makeAIRequest = async (prompt, maxTokens = 1000, useFallback = false) => {
   const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY;
 
   if (!apiKey) {
-    throw new Error("API ключ OpenRouter не найден. Добавьте VITE_OPENROUTER_API_KEY в .env файл");
+    throw new Error("API_KEY_MISSING");
   }
 
   const model = useFallback ? FALLBACK_MODEL : MODEL;
@@ -78,6 +78,11 @@ const makeAIRequest = async (prompt, maxTokens = 1000, useFallback = false) => {
       const errorData = await response.json().catch(() => ({}));
       const errorMessage = errorData.error?.message || response.statusText;
 
+      // 401 = invalid API key, don't retry
+      if (response.status === 401) {
+        throw new Error("API_KEY_INVALID");
+      }
+
       if (!useFallback && (response.status === 429 || response.status >= 500)) {
         console.warn(`Primary model failed (${response.status}), trying fallback...`);
         return makeAIRequest(prompt, maxTokens, true);
@@ -94,6 +99,11 @@ const makeAIRequest = async (prompt, maxTokens = 1000, useFallback = false) => {
 
     return data.choices[0].message.content;
   } catch (error) {
+    // Don't retry on auth errors
+    if (error.message === "API_KEY_MISSING" || error.message === "API_KEY_INVALID") {
+      throw error;
+    }
+
     if (!useFallback && error.name === 'TypeError') {
       console.warn('Network error, trying fallback model...');
       return makeAIRequest(prompt, maxTokens, true);
@@ -163,6 +173,13 @@ ${content.substring(0, 2500)}
     };
   } catch (error) {
     console.error("AI extraction error:", error);
+    // Show API config message in author field to alert user
+    if (error.message === "API_KEY_MISSING" || error.message === "API_KEY_INVALID") {
+      return {
+        title: fallback.title,
+        author: '⚠️ API ключ не настроен'
+      };
+    }
     return fallback;
   }
 };
@@ -214,6 +231,19 @@ ${content.substring(0, 4000)}
     };
   } catch (error) {
     console.error("Spell check error:", error);
+    // Return informative message when API is not configured
+    if (error.message === "API_KEY_MISSING" || error.message === "API_KEY_INVALID") {
+      return {
+        fileName,
+        errors: [{
+          word: "⚠️",
+          suggestion: "Настройте API ключ OpenRouter",
+          context: "AI проверка орфографии недоступна без API ключа"
+        }],
+        totalErrors: 0,
+        apiError: true
+      };
+    }
     return { fileName, ...fallback };
   }
 };
@@ -257,14 +287,26 @@ ${content.substring(0, 5000)}
 Проведи рецензию и ответь JSON:`;
 
   const fallback = {
-    structure: { score: 3, comment: "Анализ недоступен" },
-    logic: { score: 3, comment: "Анализ недоступен" },
-    originality: { score: 3, comment: "Анализ недоступен" },
-    style: { score: 3, comment: "Анализ недоступен" },
-    relevance: { score: 3, comment: "Анализ недоступен" },
-    overallScore: 3,
+    structure: { score: 0, comment: "Анализ недоступен" },
+    logic: { score: 0, comment: "Анализ недоступен" },
+    originality: { score: 0, comment: "Анализ недоступен" },
+    style: { score: 0, comment: "Анализ недоступен" },
+    relevance: { score: 0, comment: "Анализ недоступен" },
+    overallScore: 0,
     summary: "Не удалось создать рецензию. Попробуйте позже.",
     recommendations: []
+  };
+
+  const apiErrorFallback = {
+    structure: { score: 0, comment: "API ключ не настроен" },
+    logic: { score: 0, comment: "API ключ не настроен" },
+    originality: { score: 0, comment: "API ключ не настроен" },
+    style: { score: 0, comment: "API ключ не настроен" },
+    relevance: { score: 0, comment: "API ключ не настроен" },
+    overallScore: 0,
+    summary: "⚠️ AI рецензирование недоступно. Настройте API ключ OpenRouter в переменных окружения (VITE_OPENROUTER_API_KEY).",
+    recommendations: ["Получите API ключ на openrouter.ai", "Добавьте ключ в настройки Railway"],
+    apiError: true
   };
 
   try {
@@ -310,6 +352,10 @@ ${content.substring(0, 5000)}
     return { fileName, ...normalizedReview };
   } catch (error) {
     console.error("Review error:", error);
+    // Show clear message when API is not configured
+    if (error.message === "API_KEY_MISSING" || error.message === "API_KEY_INVALID") {
+      return { fileName, ...apiErrorFallback };
+    }
     return { fileName, ...fallback };
   }
 };
