@@ -1,5 +1,5 @@
 import React from 'react';
-import { Eye, Download, FileText } from 'lucide-react';
+import { Eye, Download, FileText, AlertTriangle } from 'lucide-react';
 import { generateReviewPDF, downloadPDF } from '../../utils/pdfGenerator';
 import { useNotifications } from '../../context/AppContext';
 
@@ -7,7 +7,7 @@ const ReviewTab = ({ articles, reviewResult, onReviewArticle }) => {
   const { showSuccess, showError } = useNotifications();
 
   const handleExportPDF = () => {
-    if (!reviewResult) return;
+    if (!reviewResult || reviewResult.apiError) return;
 
     try {
       const pdfBlob = generateReviewPDF(reviewResult);
@@ -33,12 +33,14 @@ const ReviewTab = ({ articles, reviewResult, onReviewArticle }) => {
   }
 
   const getScoreColor = (score) => {
+    if (score === 0) return 'text-gray-400';
     if (score >= 4) return 'text-green-600';
     if (score >= 3) return 'text-yellow-600';
     return 'text-red-600';
   };
 
   const getScoreBg = (score) => {
+    if (score === 0) return 'bg-gray-50';
     if (score >= 4) return 'bg-green-50';
     if (score >= 3) return 'bg-yellow-50';
     return 'bg-red-50';
@@ -74,10 +76,23 @@ const ReviewTab = ({ articles, reviewResult, onReviewArticle }) => {
         </div>
 
         {reviewResult && (
-          <div className="border border-gray-200 rounded-xl p-6">
+          <div className={`border rounded-xl p-6 ${reviewResult.apiError ? 'border-red-200 bg-red-50' : 'border-gray-200'}`}>
+            {reviewResult.apiError && (
+              <div className="bg-red-100 border border-red-300 rounded-xl p-4 mb-6 flex items-start gap-3">
+                <AlertTriangle className="text-red-600 flex-shrink-0 mt-0.5" size={24} />
+                <div>
+                  <h4 className="font-semibold text-red-800 mb-1">API не настроен</h4>
+                  <p className="text-red-700 text-sm">
+                    Для работы AI рецензирования необходимо настроить API ключ OpenRouter.
+                    Получите бесплатный ключ на <a href="https://openrouter.ai" target="_blank" rel="noopener noreferrer" className="underline font-medium">openrouter.ai</a> и добавьте его в переменные окружения как VITE_OPENROUTER_API_KEY.
+                  </p>
+                </div>
+              </div>
+            )}
+
             <div className="flex items-center justify-between mb-6">
               <h3 className="text-xl font-bold flex items-center gap-2">
-                <FileText className="text-indigo-600" size={24} />
+                <FileText className={reviewResult.apiError ? 'text-gray-400' : 'text-indigo-600'} size={24} />
                 Рецензия: {reviewResult.fileName}
               </h3>
               <span className="text-sm text-gray-500">
@@ -149,10 +164,15 @@ const ReviewTab = ({ articles, reviewResult, onReviewArticle }) => {
 
             <button
               onClick={handleExportPDF}
-              className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-6 py-4 rounded-xl hover:from-indigo-700 hover:to-purple-700 transition font-semibold shadow-lg flex items-center justify-center gap-2"
+              disabled={reviewResult.apiError}
+              className={`w-full px-6 py-4 rounded-xl transition font-semibold shadow-lg flex items-center justify-center gap-2 ${
+                reviewResult.apiError
+                  ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                  : 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white hover:from-indigo-700 hover:to-purple-700'
+              }`}
             >
               <Download size={20} />
-              Экспортировать рецензию в PDF
+              {reviewResult.apiError ? 'Экспорт недоступен' : 'Экспортировать рецензию в PDF'}
             </button>
           </div>
         )}
