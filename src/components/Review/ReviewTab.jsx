@@ -6,11 +6,11 @@ import { useNotifications } from '../../context/AppContext';
 const ReviewTab = ({ articles, reviewResult, onReviewArticle }) => {
   const { showSuccess, showError } = useNotifications();
 
-  const handleExportPDF = () => {
+  const handleExportPDF = async () => {
     if (!reviewResult || reviewResult.apiError) return;
 
     try {
-      const pdfBlob = generateReviewPDF(reviewResult);
+      const pdfBlob = await generateReviewPDF(reviewResult);
       const fileName = `review_${reviewResult.fileName.replace(/\.[^/.]+$/, '')}_${new Date().toISOString().split('T')[0]}.pdf`;
       downloadPDF(pdfBlob, fileName);
       showSuccess('Рецензия экспортирована в PDF');
