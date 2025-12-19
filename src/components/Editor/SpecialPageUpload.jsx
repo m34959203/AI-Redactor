@@ -1,6 +1,25 @@
 import React from 'react';
 import { Upload, CheckCircle } from 'lucide-react';
 
+// Color variants for Tailwind (must be explicit for purging)
+const colorVariants = {
+  blue: {
+    badge: 'bg-blue-100 text-blue-600',
+    button: 'bg-blue-600 hover:bg-blue-700',
+    border: 'border-blue-300 hover:border-blue-400',
+  },
+  purple: {
+    badge: 'bg-purple-100 text-purple-600',
+    button: 'bg-purple-600 hover:bg-purple-700',
+    border: 'border-purple-300 hover:border-purple-400',
+  },
+  orange: {
+    badge: 'bg-orange-100 text-orange-600',
+    button: 'bg-orange-600 hover:bg-orange-700',
+    border: 'border-orange-300 hover:border-orange-400',
+  },
+};
+
 const SpecialPageCard = ({
   title,
   description,
@@ -11,10 +30,19 @@ const SpecialPageCard = ({
   onDelete,
   inputRef
 }) => {
+  const colors = colorVariants[color] || colorVariants.blue;
+
   return (
-    <div className="border-2 border-dashed border-gray-300 rounded-xl p-6">
+    <label className={`block border-2 border-dashed ${colors.border} rounded-xl p-6 cursor-pointer transition-all hover:bg-gray-50`}>
+      <input
+        ref={inputRef}
+        type="file"
+        accept=".docx,.pdf"
+        onChange={(e) => onUpload(e.target.files[0])}
+        className="hidden"
+      />
       <div className="text-center">
-        <div className={`bg-${color}-100 text-${color}-600 rounded-full w-12 h-12 flex items-center justify-center mx-auto mb-3`}>
+        <div className={`${colors.badge} rounded-full w-12 h-12 flex items-center justify-center mx-auto mb-3`}>
           <span className="font-bold text-lg">{number}</span>
         </div>
         <h3 className="font-semibold text-gray-800 mb-2">{title}</h3>
@@ -25,30 +53,24 @@ const SpecialPageCard = ({
             <CheckCircle className="text-green-600 mx-auto mb-2" size={24} />
             <p className="text-sm text-green-800 font-medium truncate">{page.name}</p>
             <button
-              onClick={onDelete}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onDelete();
+              }}
               className="mt-2 text-xs text-red-600 hover:text-red-800"
             >
               Удалить
             </button>
           </div>
         ) : (
-          <button
-            onClick={() => inputRef.current?.click()}
-            className={`w-full bg-${color}-600 text-white px-4 py-2 rounded-lg hover:bg-${color}-700 text-sm`}
-          >
-            <Upload className="inline mr-2" size={16} />
+          <div className={`w-full ${colors.button} text-white px-4 py-2 rounded-lg text-sm flex items-center justify-center`}>
+            <Upload className="mr-2" size={16} />
             Загрузить
-          </button>
+          </div>
         )}
-        <input
-          ref={inputRef}
-          type="file"
-          accept=".docx,.pdf"
-          onChange={(e) => onUpload(e.target.files[0])}
-          className="hidden"
-        />
       </div>
-    </div>
+    </label>
   );
 };
 
