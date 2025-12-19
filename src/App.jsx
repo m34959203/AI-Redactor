@@ -20,7 +20,7 @@ import { addToArchive, getPdfBlob, removeFromArchive } from './utils/archiveStor
 const App = () => {
   const { state, actions } = useApp();
   const { notifications, showSuccess, showError, removeNotification } = useNotifications();
-  const { isProcessing, processingMessage, setProcessing } = useProcessing();
+  const { isProcessing, processingMessage, progressCurrent, progressTotal, setProcessing } = useProcessing();
 
   const {
     articles,
@@ -90,14 +90,17 @@ const App = () => {
 
   // Articles upload handler
   const handleArticlesUpload = async (files) => {
-    setProcessing(true, 'Загрузка статей...');
+    const totalFiles = files.length;
+    setProcessing(true, 'Загрузка статей...', 0, totalFiles);
     const newArticles = [];
     const spellChecks = [];
 
     try {
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
-        setProcessing(true, `Обработка файла ${i + 1}/${files.length}: ${file.name}`);
+        const currentFile = i + 1;
+
+        setProcessing(true, `Чтение: ${file.name}`, currentFile, totalFiles);
 
         const validation = validateArticleFile(file);
         if (!validation.valid) {
@@ -113,7 +116,7 @@ const App = () => {
           content = await file.text();
         }
 
-        setProcessing(true, `AI анализ: ${file.name}`);
+        setProcessing(true, `AI анализ: ${file.name}`, currentFile, totalFiles);
         const metadata = await extractMetadataWithAI(file.name, content);
         const language = detectLanguage(metadata.author);
 
@@ -128,7 +131,7 @@ const App = () => {
 
         newArticles.push(article);
 
-        setProcessing(true, `Проверка орфографии: ${file.name}`);
+        setProcessing(true, `Орфография: ${file.name}`, currentFile, totalFiles);
         const spellCheck = await checkSpelling(content, file.name);
         spellChecks.push(spellCheck);
       }
@@ -338,7 +341,13 @@ const App = () => {
           />
         )}
 
-        {isProcessing && <LoadingOverlay message={processingMessage} />}
+        {isProcessing && (
+          <LoadingOverlay
+            message={processingMessage}
+            current={progressCurrent}
+            total={progressTotal}
+          />
+        )}
       </div>
 
       {/* Toast notifications */}
