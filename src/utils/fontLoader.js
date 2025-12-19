@@ -3,17 +3,17 @@
  * Loads PT Serif font (Times New Roman-like) for academic journals
  */
 
-// Font URLs (PT Serif - similar to Times New Roman, supports Cyrillic)
+// Font URLs from Google Fonts repository (PT Serif - Times-like, supports Cyrillic)
 const FONT_URLS = {
-  regular: 'https://cdn.jsdelivr.net/gh/nickmessing/jsPDF-CustomFonts-support@master/fonts/PTSerif_regular.ttf',
-  bold: 'https://cdn.jsdelivr.net/gh/nickmessing/jsPDF-CustomFonts-support@master/fonts/PTSerif_bold.ttf',
-  italic: 'https://cdn.jsdelivr.net/gh/nickmessing/jsPDF-CustomFonts-support@master/fonts/PTSerif_italic.ttf',
+  regular: 'https://raw.githubusercontent.com/google/fonts/main/ofl/ptserif/PTSerif-Regular.ttf',
+  bold: 'https://raw.githubusercontent.com/google/fonts/main/ofl/ptserif/PTSerif-Bold.ttf',
+  italic: 'https://raw.githubusercontent.com/google/fonts/main/ofl/ptserif/PTSerif-Italic.ttf',
 };
 
 // Fallback to PT Sans if PT Serif not available
 const FALLBACK_URLS = {
-  regular: 'https://cdn.jsdelivr.net/gh/nickmessing/jsPDF-CustomFonts-support@master/fonts/PTSans_normal.ttf',
-  bold: 'https://cdn.jsdelivr.net/gh/nickmessing/jsPDF-CustomFonts-support@master/fonts/PTSans_bold.ttf',
+  regular: 'https://raw.githubusercontent.com/google/fonts/main/ofl/ptsans/PTSans-Regular.ttf',
+  bold: 'https://raw.githubusercontent.com/google/fonts/main/ofl/ptsans/PTSans-Bold.ttf',
 };
 
 // Cache for loaded fonts
