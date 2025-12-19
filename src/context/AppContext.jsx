@@ -20,6 +20,8 @@ const initialState = {
   activeTab: 'editor',
   isProcessing: false,
   processingMessage: '',
+  progressCurrent: null,
+  progressTotal: null,
 
   // Archive
   archive: [],
@@ -113,6 +115,8 @@ function appReducer(state, action) {
         ...state,
         isProcessing: action.payload.isProcessing,
         processingMessage: action.payload.message || '',
+        progressCurrent: action.payload.current ?? null,
+        progressTotal: action.payload.total ?? null,
       };
 
     case ACTIONS.SET_ARCHIVE:
@@ -207,8 +211,8 @@ export function AppProvider({ children }) {
       dispatch({ type: ACTIONS.SET_ACTIVE_TAB, payload: tab });
     }, []),
 
-    setProcessing: useCallback((isProcessing, message = '') => {
-      dispatch({ type: ACTIONS.SET_PROCESSING, payload: { isProcessing, message } });
+    setProcessing: useCallback((isProcessing, message = '', current = null, total = null) => {
+      dispatch({ type: ACTIONS.SET_PROCESSING, payload: { isProcessing, message, current, total } });
     }, []),
 
     setArchive: useCallback((archive) => {
@@ -309,6 +313,8 @@ export function useProcessing() {
   return {
     isProcessing: state.isProcessing,
     processingMessage: state.processingMessage,
+    progressCurrent: state.progressCurrent,
+    progressTotal: state.progressTotal,
     setProcessing: actions.setProcessing,
   };
 }
