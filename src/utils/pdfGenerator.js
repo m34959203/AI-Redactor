@@ -2,6 +2,7 @@
  * PDF generation utilities using jsPDF
  */
 import { jsPDF } from 'jspdf';
+import html2canvas from 'html2canvas';
 import { convertDocxToHtml, readFileAsArrayBuffer } from './docxConverter';
 import { registerCyrillicFont, getFontName, preloadFonts } from './fontLoader';
 
@@ -396,6 +397,191 @@ const renderHtmlWithImagesToPdf = (doc, html, startY, startPage) => {
 };
 
 /**
+ * Renders HTML content as image to preserve original Word formatting
+ * @param {jsPDF} doc - jsPDF instance
+ * @param {string} html - HTML content from DOCX
+ * @param {number} startY - Starting Y position
+ * @param {number} startPage - Starting page number
+ * @returns {Promise<{endY: number, endPage: number, hasContent: boolean}>}
+ */
+const renderHtmlAsImage = async (doc, html, startY, startPage) => {
+  let currentY = startY;
+  let currentPage = startPage;
+  let hasContent = false;
+
+  if (!html || html.trim() === '') {
+    return { endY: currentY, endPage: currentPage, hasContent };
+  }
+
+  // Create a hidden container for rendering
+  const container = document.createElement('div');
+  container.style.cssText = `
+    position: absolute;
+    left: -9999px;
+    top: 0;
+    width: 160mm;
+    padding: 0;
+    margin: 0;
+    background: white;
+    font-family: 'Times New Roman', Times, serif;
+    font-size: 12pt;
+    line-height: 1.5;
+    color: black;
+  `;
+
+  // Add styles for proper rendering
+  const styleElement = document.createElement('style');
+  styleElement.textContent = `
+    .docx-content * {
+      max-width: 100%;
+      box-sizing: border-box;
+    }
+    .docx-content p {
+      margin: 0 0 0.5em 0;
+      text-align: justify;
+      text-indent: 1.25cm;
+    }
+    .docx-content p:first-child {
+      text-indent: 0;
+    }
+    .docx-content img {
+      max-width: 100%;
+      height: auto;
+      display: block;
+      margin: 1em auto;
+    }
+    .docx-content table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1em 0;
+      font-size: 10pt;
+    }
+    .docx-content table, .docx-content th, .docx-content td {
+      border: 1px solid #333;
+    }
+    .docx-content th, .docx-content td {
+      padding: 4px 8px;
+      text-align: left;
+    }
+    .docx-content th {
+      background-color: #f0f0f0;
+      font-weight: bold;
+    }
+    .docx-content h1, .docx-content h2, .docx-content h3 {
+      margin: 1em 0 0.5em 0;
+      font-weight: bold;
+    }
+    .docx-content h1 { font-size: 16pt; }
+    .docx-content h2 { font-size: 14pt; }
+    .docx-content h3 { font-size: 13pt; }
+    .docx-content strong, .docx-content b { font-weight: bold; }
+    .docx-content em, .docx-content i { font-style: italic; }
+    .docx-content u { text-decoration: underline; }
+    .docx-content ul, .docx-content ol {
+      margin: 0.5em 0;
+      padding-left: 2em;
+    }
+    .docx-content li {
+      margin: 0.25em 0;
+    }
+  `;
+
+  container.appendChild(styleElement);
+
+  const contentDiv = document.createElement('div');
+  contentDiv.className = 'docx-content';
+  contentDiv.innerHTML = html;
+  container.appendChild(contentDiv);
+
+  document.body.appendChild(container);
+
+  try {
+    // Wait for images to load
+    const images = container.querySelectorAll('img');
+    await Promise.all(Array.from(images).map(img => {
+      if (img.complete) return Promise.resolve();
+      return new Promise((resolve) => {
+        img.onload = resolve;
+        img.onerror = resolve;
+      });
+    }));
+
+    // Render to canvas
+    const canvas = await html2canvas(container, {
+      scale: 2, // Higher quality
+      useCORS: true,
+      allowTaint: true,
+      backgroundColor: '#ffffff',
+      logging: false
+    });
+
+    hasContent = true;
+
+    // Calculate dimensions
+    const imgWidth = CONTENT_WIDTH;
+    const imgHeight = (canvas.height * imgWidth) / canvas.width;
+
+    // Split into pages if content is too tall
+    let remainingHeight = imgHeight;
+    let sourceY = 0;
+
+    while (remainingHeight > 0) {
+      // Check if we need a new page
+      if (currentY > MARGIN_TOP && currentY + Math.min(remainingHeight, 50) > PAGE_HEIGHT - MARGIN_BOTTOM) {
+        addPageNumber(doc, currentPage);
+        doc.addPage();
+        currentPage++;
+        currentY = MARGIN_TOP;
+      }
+
+      const availableHeight = PAGE_HEIGHT - MARGIN_BOTTOM - currentY;
+      const heightToDraw = Math.min(remainingHeight, availableHeight);
+
+      // Calculate source rectangle from canvas
+      const sourceHeight = (heightToDraw / imgWidth) * canvas.width;
+
+      // Create a temporary canvas for this portion
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = canvas.width;
+      tempCanvas.height = sourceHeight;
+      const tempCtx = tempCanvas.getContext('2d');
+      tempCtx.drawImage(
+        canvas,
+        0, sourceY, canvas.width, sourceHeight,
+        0, 0, canvas.width, sourceHeight
+      );
+
+      const partImgData = tempCanvas.toDataURL('image/jpeg', 0.95);
+      doc.addImage(partImgData, 'JPEG', MARGIN_LEFT, currentY, imgWidth, heightToDraw);
+
+      sourceY += sourceHeight;
+      remainingHeight -= heightToDraw;
+      currentY += heightToDraw;
+
+      if (remainingHeight > 0) {
+        addPageNumber(doc, currentPage);
+        doc.addPage();
+        currentPage++;
+        currentY = MARGIN_TOP;
+      }
+    }
+
+  } catch (error) {
+    console.error('Error rendering HTML as image:', error);
+    // Fallback to text rendering
+    const fontName = getFontName();
+    doc.setFont(fontName, 'normal');
+    doc.setFontSize(FONT_SIZE);
+    doc.text('[Ошибка рендеринга контента]', MARGIN_LEFT, currentY);
+    currentY += LINE_HEIGHT;
+  } finally {
+    document.body.removeChild(container);
+  }
+
+  return { endY: currentY, endPage: currentPage, hasContent };
+};
+
+/**
  * Adds a special page (cover, description, final) to PDF
  * @param {jsPDF} doc - jsPDF instance
  * @param {Object} pageData - Page data with file
@@ -444,8 +630,8 @@ const addSpecialPage = async (doc, pageData, pageNum, pageName = 'страниц
         return pageNum;
       }
 
-      // Use image-aware renderer for special pages
-      const result = renderHtmlWithImagesToPdf(doc, html, MARGIN_TOP, pageNum);
+      // Use html2canvas to preserve original Word formatting
+      const result = await renderHtmlAsImage(doc, html, MARGIN_TOP, pageNum);
 
       if (!result.hasContent) {
         console.warn(`No rendered content for ${pageName}: ${pageData.name}`);
@@ -609,13 +795,13 @@ export const generatePDF = async (issue, articles, coverPage, descriptionPage, f
 
       doc.setFont(fontName, 'normal');
 
-      // Article content (with images, tables, and other elements)
+      // Article content - render as image to preserve original Word formatting
       if (article.file) {
         try {
           const { html, images } = await convertDocxToHtml(article.file);
           console.log(`Article "${article.title}": HTML=${html?.length || 0} chars, images=${images?.length || 0}`);
-          // Use image and table-aware renderer for articles
-          const result = renderHtmlWithImagesToPdf(doc, html, startY, currentPage);
+          // Use html2canvas to preserve original formatting
+          const result = await renderHtmlAsImage(doc, html, startY, currentPage);
           currentPage = result.endPage;
           addPageNumber(doc, currentPage);
         } catch (error) {
