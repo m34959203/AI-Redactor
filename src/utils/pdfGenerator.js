@@ -306,6 +306,78 @@ const renderHtmlWithImagesToPdf = (doc, html, startY, startPage) => {
         doc.setFont(fontName, 'normal');
         doc.setFontSize(FONT_SIZE);
         currentY += LINE_HEIGHT / 2;
+      } else if (node.tagName === 'TABLE') {
+        // Handle tables
+        hasContent = true;
+        const rows = node.querySelectorAll('tr');
+        if (rows.length === 0) return;
+
+        // Calculate column widths based on number of columns in first row
+        const firstRow = rows[0];
+        const colCount = firstRow.querySelectorAll('td, th').length || 1;
+        const colWidth = CONTENT_WIDTH / colCount;
+        const cellPadding = 2;
+        const rowHeight = LINE_HEIGHT * 1.5;
+
+        // Check if table fits on current page, otherwise start new page
+        const estimatedTableHeight = rows.length * rowHeight;
+        if (currentY + Math.min(estimatedTableHeight, 50) > PAGE_HEIGHT - MARGIN_BOTTOM) {
+          addPageNumber(doc, currentPage);
+          doc.addPage();
+          currentPage++;
+          currentY = MARGIN_TOP;
+        }
+
+        doc.setFontSize(10); // Smaller font for tables
+        const tableStartY = currentY;
+
+        rows.forEach((row, rowIndex) => {
+          const cells = row.querySelectorAll('td, th');
+          const isHeader = row.querySelectorAll('th').length > 0;
+
+          // Check if we need a new page for this row
+          if (currentY + rowHeight > PAGE_HEIGHT - MARGIN_BOTTOM) {
+            addPageNumber(doc, currentPage);
+            doc.addPage();
+            currentPage++;
+            currentY = MARGIN_TOP;
+          }
+
+          // Draw row background for header
+          if (isHeader) {
+            doc.setFillColor(240, 240, 240);
+            doc.rect(MARGIN_LEFT, currentY - 1, CONTENT_WIDTH, rowHeight, 'F');
+            doc.setFont(fontName, 'bold');
+          } else {
+            doc.setFont(fontName, 'normal');
+          }
+
+          // Draw cells
+          cells.forEach((cell, cellIndex) => {
+            const cellX = MARGIN_LEFT + (cellIndex * colWidth);
+            const cellText = cell.textContent.trim();
+
+            // Draw cell border
+            doc.setDrawColor(180, 180, 180);
+            doc.rect(cellX, currentY - 1, colWidth, rowHeight);
+
+            // Draw cell text (truncate if too long)
+            if (cellText) {
+              const maxTextWidth = colWidth - (cellPadding * 2);
+              let displayText = cellText;
+              while (doc.getTextWidth(displayText) > maxTextWidth && displayText.length > 3) {
+                displayText = displayText.slice(0, -4) + '...';
+              }
+              doc.text(displayText, cellX + cellPadding, currentY + LINE_HEIGHT * 0.8);
+            }
+          });
+
+          currentY += rowHeight;
+        });
+
+        doc.setFontSize(FONT_SIZE);
+        doc.setFont(fontName, 'normal');
+        currentY += LINE_HEIGHT; // Space after table
       } else {
         // Process other elements recursively
         for (const child of node.childNodes) {
@@ -537,11 +609,13 @@ export const generatePDF = async (issue, articles, coverPage, descriptionPage, f
 
       doc.setFont(fontName, 'normal');
 
-      // Article content
+      // Article content (with images, tables, and other elements)
       if (article.file) {
         try {
-          const { html } = await convertDocxToHtml(article.file);
-          const result = renderHtmlToPdf(doc, html, startY, currentPage);
+          const { html, images } = await convertDocxToHtml(article.file);
+          console.log(`Article "${article.title}": HTML=${html?.length || 0} chars, images=${images?.length || 0}`);
+          // Use image and table-aware renderer for articles
+          const result = renderHtmlWithImagesToPdf(doc, html, startY, currentPage);
           currentPage = result.endPage;
           addPageNumber(doc, currentPage);
         } catch (error) {
