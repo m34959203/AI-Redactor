@@ -447,8 +447,29 @@ const renderHtmlAsImage = async (doc, html, startY, startPage) => {
     .docx-content img {
       max-width: 100%;
       height: auto;
+    }
+    .docx-content img:not(.float-left):not(.float-right) {
       display: block;
       margin: 1em auto;
+    }
+    .docx-content img.float-left {
+      float: left;
+      margin: 0 1em 0.5em 0;
+      max-width: 45%;
+    }
+    .docx-content img.float-right {
+      float: right;
+      margin: 0 0 0.5em 1em;
+      max-width: 45%;
+    }
+    .docx-content p:has(img.float-left),
+    .docx-content p:has(img.float-right) {
+      overflow: hidden;
+    }
+    .docx-content::after {
+      content: "";
+      display: table;
+      clear: both;
     }
     .docx-content table {
       width: 100%;
@@ -477,6 +498,11 @@ const renderHtmlAsImage = async (doc, html, startY, startPage) => {
     .docx-content strong, .docx-content b { font-weight: bold; }
     .docx-content em, .docx-content i { font-style: italic; }
     .docx-content u { text-decoration: underline; }
+    /* Author info styling - typically italic text near photo */
+    .docx-content p > em:only-child,
+    .docx-content p > i:only-child {
+      display: block;
+    }
     .docx-content ul, .docx-content ol {
       margin: 0.5em 0;
       padding-left: 2em;
