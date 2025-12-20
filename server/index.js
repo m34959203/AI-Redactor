@@ -364,6 +364,25 @@ app.post('/api/convert-base64', async (req, res) => {
   }
 });
 
+// Serve static files in production (frontend build)
+const PUBLIC_DIR = path.join(__dirname, '..', 'public');
+try {
+  await fs.access(PUBLIC_DIR);
+  app.use(express.static(PUBLIC_DIR));
+
+  // SPA fallback - serve index.html for all non-API routes
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api')) {
+      return next();
+    }
+    res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
+  });
+
+  console.log('📁 Serving static files from:', PUBLIC_DIR);
+} catch {
+  console.log('📁 No public directory found (development mode)');
+}
+
 // Error handling middleware
 app.use((error, req, res, next) => {
   console.error('Server error:', error);

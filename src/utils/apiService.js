@@ -3,7 +3,10 @@
  * Uses LibreOffice for accurate Word → PDF conversion
  */
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+// In production (same domain), use empty string for relative URLs
+// In development, use localhost:3001
+const API_URL = import.meta.env.VITE_API_URL ||
+  (import.meta.env.PROD ? '' : 'http://localhost:3001');
 
 /**
  * Check if server is available
