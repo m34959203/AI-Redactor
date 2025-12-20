@@ -22,19 +22,21 @@ const StepIcon = ({ type }) => {
   return icons[type] || icons.reading;
 };
 
-// Detect step type from message
+// Detect step type from message (3 steps per file)
 const getStepInfo = (message) => {
   if (message.includes('Чтение')) {
-    return { type: 'reading', label: 'Чтение файла', color: 'text-blue-600 bg-blue-100' };
+    return { type: 'reading', label: 'Чтение файла', color: 'text-blue-600 bg-blue-100', stepNum: 1 };
   }
   if (message.includes('AI анализ')) {
-    return { type: 'ai', label: 'AI анализ метаданных', color: 'text-purple-600 bg-purple-100' };
+    return { type: 'ai', label: 'AI анализ метаданных', color: 'text-purple-600 bg-purple-100', stepNum: 2 };
   }
   if (message.includes('Орфография')) {
-    return { type: 'spell', label: 'Проверка орфографии', color: 'text-green-600 bg-green-100' };
+    return { type: 'spell', label: 'Проверка орфографии', color: 'text-green-600 bg-green-100', stepNum: 3 };
   }
-  return { type: 'reading', label: 'Обработка', color: 'text-gray-600 bg-gray-100' };
+  return { type: 'reading', label: 'Обработка', color: 'text-gray-600 bg-gray-100', stepNum: 1 };
 };
+
+const STEPS_PER_FILE = 3;
 
 // Extract filename from message
 const getFileName = (message) => {
@@ -113,7 +115,7 @@ const LoadingOverlay = ({ message = 'Обработка...', current, total }) =
             </div>
             <p className="text-sm text-gray-500">
               {fileCounts
-                ? `Файл ${fileCounts.currentFile} из ${fileCounts.totalFiles} • ${progressPercent}%`
+                ? `Шаг ${stepInfo.stepNum} из ${STEPS_PER_FILE}`
                 : `${progressPercent}%`
               }
             </p>
