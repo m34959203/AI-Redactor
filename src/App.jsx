@@ -200,7 +200,7 @@ const App = () => {
     try {
       const issue = createIssue(articles, coverPage, descriptionPage, finalPage);
 
-      const { blob: pdfBlob, method } = await generatePDFSmart(
+      const { blob: pdfBlob } = await generatePDFSmart(
         issue,
         articles,
         coverPage,
@@ -216,10 +216,7 @@ const App = () => {
 
       downloadPDF(pdfBlob, `${issue.name.replace(/\s+/g, '_')}.pdf`);
 
-      const methodInfo = method === 'server'
-        ? '(LibreOffice - точное сохранение форматирования)'
-        : '(локальная генерация)';
-      showSuccess(`PDF успешно сгенерирован ${methodInfo}! ${articles.length} статей в выпуске.`);
+      showSuccess(`PDF успешно сгенерирован! ${articles.length} статей в выпуске.`);
     } catch (error) {
       console.error('Error generating PDF:', error);
       showError('Ошибка при генерации PDF: ' + error.message);
