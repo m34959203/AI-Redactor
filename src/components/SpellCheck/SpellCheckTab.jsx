@@ -1,7 +1,25 @@
 import React from 'react';
-import { AlertCircle, X } from 'lucide-react';
+import { AlertCircle, X, Check, CheckCheck } from 'lucide-react';
+import { useApp } from '../../context/AppContext';
 
 const SpellCheckTab = ({ spellCheckResults }) => {
+  const { actions } = useApp();
+
+  const handleFixError = (fileName, errorIndex, word, suggestion) => {
+    actions.fixSpellingError(fileName, errorIndex, word, suggestion);
+    actions.showSuccess(`Исправлено: "${word}" → "${suggestion}"`);
+  };
+
+  const handleFixAllErrors = (result) => {
+    // Fix all errors in reverse order to maintain correct indices
+    const errors = [...result.errors];
+    errors.forEach((error, idx) => {
+      // We use index 0 each time because after each fix, the array shifts
+      actions.fixSpellingError(result.fileName, 0, error.word, error.suggestion);
+    });
+    actions.showSuccess(`Исправлено ${errors.length} ошибок в файле "${result.fileName}"`);
+  };
+
   if (spellCheckResults.length === 0) {
     return (
       <div className="bg-white rounded-2xl shadow-xl p-8">
@@ -27,17 +45,28 @@ const SpellCheckTab = ({ spellCheckResults }) => {
           <div key={idx} className="border border-gray-200 rounded-xl p-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold text-gray-800">{result.fileName}</h3>
-              <span
-                className={`px-3 py-1 rounded-full text-sm font-semibold ${
-                  result.totalErrors === 0
-                    ? 'bg-green-100 text-green-700'
-                    : 'bg-yellow-100 text-yellow-700'
-                }`}
-              >
-                {result.totalErrors === 0
-                  ? 'Ошибок не найдено'
-                  : `Найдено ошибок: ${result.totalErrors}`}
-              </span>
+              <div className="flex items-center gap-3">
+                {result.errors && result.errors.length > 0 && (
+                  <button
+                    onClick={() => handleFixAllErrors(result)}
+                    className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors"
+                  >
+                    <CheckCheck size={16} />
+                    Исправить все
+                  </button>
+                )}
+                <span
+                  className={`px-3 py-1 rounded-full text-sm font-semibold ${
+                    result.totalErrors === 0
+                      ? 'bg-green-100 text-green-700'
+                      : 'bg-yellow-100 text-yellow-700'
+                  }`}
+                >
+                  {result.totalErrors === 0
+                    ? 'Ошибок не найдено'
+                    : `Найдено ошибок: ${result.totalErrors}`}
+                </span>
+              </div>
             </div>
 
             {result.errors && result.errors.length > 0 && (
@@ -54,6 +83,13 @@ const SpellCheckTab = ({ spellCheckResults }) => {
                         </p>
                         <p className="text-sm text-gray-600 mt-1">{error.context}</p>
                       </div>
+                      <button
+                        onClick={() => handleFixError(result.fileName, errIdx, error.word, error.suggestion)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition-colors flex-shrink-0"
+                      >
+                        <Check size={16} />
+                        Исправить
+                      </button>
                     </div>
                   </div>
                 ))}

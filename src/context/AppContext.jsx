@@ -46,6 +46,7 @@ const ACTIONS = {
   SET_FINAL_PAGE: 'SET_FINAL_PAGE',
 
   ADD_SPELL_CHECK_RESULTS: 'ADD_SPELL_CHECK_RESULTS',
+  FIX_SPELLING_ERROR: 'FIX_SPELLING_ERROR',
   SET_REVIEW_RESULT: 'SET_REVIEW_RESULT',
 
   SET_ACTIVE_TAB: 'SET_ACTIVE_TAB',
@@ -103,6 +104,40 @@ function appReducer(state, action) {
         ...state,
         spellCheckResults: [...state.spellCheckResults, ...action.payload],
       };
+
+    case ACTIONS.FIX_SPELLING_ERROR: {
+      const { fileName, errorIndex, word, suggestion } = action.payload;
+
+      // Update article content
+      const updatedArticles = state.articles.map(article => {
+        if (article.file?.name === fileName) {
+          return {
+            ...article,
+            content: article.content.replace(new RegExp(word, 'g'), suggestion)
+          };
+        }
+        return article;
+      });
+
+      // Remove the fixed error from spell check results
+      const updatedSpellCheckResults = state.spellCheckResults.map(result => {
+        if (result.fileName === fileName) {
+          const newErrors = result.errors.filter((_, idx) => idx !== errorIndex);
+          return {
+            ...result,
+            errors: newErrors,
+            totalErrors: newErrors.length
+          };
+        }
+        return result;
+      });
+
+      return {
+        ...state,
+        articles: updatedArticles,
+        spellCheckResults: updatedSpellCheckResults,
+      };
+    }
 
     case ACTIONS.SET_REVIEW_RESULT:
       return { ...state, reviewResult: action.payload };
@@ -201,6 +236,13 @@ export function AppProvider({ children }) {
 
     addSpellCheckResults: useCallback((results) => {
       dispatch({ type: ACTIONS.ADD_SPELL_CHECK_RESULTS, payload: results });
+    }, []),
+
+    fixSpellingError: useCallback((fileName, errorIndex, word, suggestion) => {
+      dispatch({
+        type: ACTIONS.FIX_SPELLING_ERROR,
+        payload: { fileName, errorIndex, word, suggestion }
+      });
     }, []),
 
     setReviewResult: useCallback((result) => {
