@@ -414,3 +414,69 @@ ${content.substring(0, 5000)}
     return { fileName, ...fallback };
   }
 };
+
+/**
+ * Available scientific sections for the journal
+ */
+export const ARTICLE_SECTIONS = [
+  'ТЕХНИЧЕСКИЕ НАУКИ',
+  'ПЕДАГОГИЧЕСКИЕ НАУКИ',
+  'ЕСТЕСТВЕННЫЕ И ЭКОНОМИЧЕСКИЕ НАУКИ'
+];
+
+/**
+ * Detects the thematic section of a scientific article using AI
+ * @param {string} content - Article content
+ * @param {string} title - Article title
+ * @returns {Promise<string>} - Section name
+ */
+export const detectArticleSection = async (content, title) => {
+  const prompt = `Определи тематический раздел научной статьи.
+
+ДОСТУПНЫЕ РАЗДЕЛЫ:
+1. ТЕХНИЧЕСКИЕ НАУКИ - инженерия, IT, программирование, машиностроение, строительство, архитектура, электроника, автоматизация, транспорт, энергетика
+2. ПЕДАГОГИЧЕСКИЕ НАУКИ - образование, методика преподавания, дидактика, воспитание, психология обучения, педагогика, учебные программы
+3. ЕСТЕСТВЕННЫЕ И ЭКОНОМИЧЕСКИЕ НАУКИ - физика, химия, биология, экология, математика, экономика, финансы, менеджмент, маркетинг, бухгалтерия, медицина, география
+
+ПРАВИЛА:
+- Выбери ОДИН наиболее подходящий раздел из списка выше
+- Основывайся на ключевых словах, теме и содержании статьи
+- Если статья междисциплинарная, выбери преобладающую тему
+- Верни ТОЧНОЕ название раздела как в списке
+
+ПРИМЕРЫ:
+Вход: "Разработка алгоритма машинного обучения для распознавания образов"
+Выход: {"section": "ТЕХНИЧЕСКИЕ НАУКИ"}
+
+Вход: "Методика обучения математике в начальной школе"
+Выход: {"section": "ПЕДАГОГИЧЕСКИЕ НАУКИ"}
+
+Вход: "Анализ финансовых показателей предприятия"
+Выход: {"section": "ЕСТЕСТВЕННЫЕ И ЭКОНОМИЧЕСКИЕ НАУКИ"}
+
+НАЗВАНИЕ СТАТЬИ: "${title}"
+НАЧАЛО ТЕКСТА: ${content.substring(0, 2000)}
+
+Ответь JSON: {"section": "..."}`;
+
+  const fallback = ARTICLE_SECTIONS[0]; // Default to first section
+
+  try {
+    const response = await makeAIRequest(prompt, 300);
+    const result = safeJsonParse(response, { section: fallback });
+
+    // Validate that returned section is one of the allowed ones
+    const detectedSection = result.section?.toUpperCase?.() || fallback;
+
+    // Find matching section (case-insensitive partial match)
+    const matchedSection = ARTICLE_SECTIONS.find(s =>
+      s.toUpperCase().includes(detectedSection.replace(/\s+/g, ' ').trim()) ||
+      detectedSection.includes(s.toUpperCase())
+    );
+
+    return matchedSection || fallback;
+  } catch (error) {
+    console.error("Section detection error:", error);
+    return fallback;
+  }
+};

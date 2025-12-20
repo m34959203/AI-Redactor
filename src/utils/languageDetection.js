@@ -71,22 +71,41 @@ export const getLocale = (code) => {
 
 /**
  * Gets language priority for sorting (lower = first)
- * Order: Cyrillic (Russian) → Kazakh → Latin (English)
+ * Order: Latin (English) → Cyrillic (Russian) → Kazakh (as per TZ requirement)
  * @param {LanguageCode} code - Language code
  * @returns {number} - Sort priority
  */
 const getLanguagePriority = (code) => {
   const priorities = {
-    cyrillic: 0,  // Russian first
-    kazakh: 1,    // Kazakh second
-    latin: 2      // English last
+    latin: 0,     // English first (A-Z)
+    cyrillic: 1,  // Russian second (А-Я)
+    kazakh: 2     // Kazakh last (А-Я)
   };
   return priorities[code] ?? 3;
 };
 
 /**
+ * Section order for journal
+ */
+export const SECTION_ORDER = [
+  'ТЕХНИЧЕСКИЕ НАУКИ',
+  'ПЕДАГОГИЧЕСКИЕ НАУКИ',
+  'ЕСТЕСТВЕННЫЕ И ЭКОНОМИЧЕСКИЕ НАУКИ'
+];
+
+/**
+ * Gets section priority for sorting
+ * @param {string} section - Section name
+ * @returns {number} - Sort priority
+ */
+const getSectionPriority = (section) => {
+  const index = SECTION_ORDER.indexOf(section);
+  return index >= 0 ? index : SECTION_ORDER.length;
+};
+
+/**
  * Sorts articles by language and then by author name
- * Order: Russian (А-Я) → Kazakh (А-Я) → English (A-Z)
+ * Order: Latin (A-Z) → Cyrillic (А-Я) → Kazakh (А-Я) - as per TZ requirement
  *
  * @param {Array<{author: string, language: LanguageCode}>} articles - Array of articles
  * @returns {Array} - Sorted articles
@@ -110,6 +129,64 @@ export const sortArticlesByLanguage = (articles) => {
 
     return authorA.localeCompare(authorB, localeA, { sensitivity: 'base' });
   });
+};
+
+/**
+ * Sorts articles by section first, then by language, then by author name
+ * Section Order: ТЕХНИЧЕСКИЕ НАУКИ → ПЕДАГОГИЧЕСКИЕ НАУКИ → ЕСТЕСТВЕННЫЕ И ЭКОНОМИЧЕСКИЕ НАУКИ
+ * Language Order within section: Latin (A-Z) → Cyrillic (А-Я) → Kazakh (А-Я)
+ *
+ * @param {Array<{author: string, language: LanguageCode, section: string}>} articles - Array of articles
+ * @returns {Array} - Sorted articles
+ */
+export const sortArticlesBySectionAndLanguage = (articles) => {
+  if (!Array.isArray(articles)) return [];
+
+  return [...articles].sort((a, b) => {
+    // First, sort by section priority
+    const sectionPriorityA = getSectionPriority(a.section);
+    const sectionPriorityB = getSectionPriority(b.section);
+
+    if (sectionPriorityA !== sectionPriorityB) {
+      return sectionPriorityA - sectionPriorityB;
+    }
+
+    // Then, sort by language priority within the same section
+    const langPriorityA = getLanguagePriority(a.language);
+    const langPriorityB = getLanguagePriority(b.language);
+
+    if (langPriorityA !== langPriorityB) {
+      return langPriorityA - langPriorityB;
+    }
+
+    // Finally, sort by author name within the same language group
+    const localeA = getLocale(a.language);
+    const authorA = a.author || '';
+    const authorB = b.author || '';
+
+    return authorA.localeCompare(authorB, localeA, { sensitivity: 'base' });
+  });
+};
+
+/**
+ * Groups articles by section
+ * @param {Array} articles - Array of articles
+ * @returns {Object} - Articles grouped by section (only non-empty sections)
+ */
+export const groupArticlesBySection = (articles) => {
+  if (!Array.isArray(articles)) return {};
+
+  const groups = {};
+
+  // Initialize groups in correct order
+  SECTION_ORDER.forEach(section => {
+    const sectionArticles = articles.filter(a => a.section === section);
+    if (sectionArticles.length > 0) {
+      groups[section] = sectionArticles;
+    }
+  });
+
+  return groups;
 };
 
 /**
