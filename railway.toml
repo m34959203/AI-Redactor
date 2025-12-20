@@ -1,6 +1,7 @@
 [build]
 builder = "dockerfile"
 dockerfilePath = "Dockerfile"
+# Railway automatically passes env vars as build args
 
 [deploy]
 healthcheckPath = "/api/health"

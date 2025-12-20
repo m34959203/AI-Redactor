@@ -6,6 +6,10 @@ FROM node:20-slim AS frontend-builder
 
 WORKDIR /app
 
+# Build arguments for Vite (passed from Railway)
+ARG VITE_OPENROUTER_API_KEY
+ENV VITE_OPENROUTER_API_KEY=$VITE_OPENROUTER_API_KEY
+
 # Copy frontend package files
 COPY package*.json ./
 RUN npm ci
