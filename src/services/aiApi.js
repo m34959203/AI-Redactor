@@ -5,7 +5,7 @@
 
 const API_URL = "https://openrouter.ai/api/v1/chat/completions";
 const MODEL = "tngtech/deepseek-r1t2-chimera:free";
-const FALLBACK_MODEL = "deepseek/deepseek-chat:free";
+const FALLBACK_MODEL = "deepseek/deepseek-r1:free"; // Updated to working model
 
 // System prompt for consistent AI behavior
 const SYSTEM_PROMPT = `Ты - помощник редактора научного журнала.
@@ -19,29 +19,65 @@ const SYSTEM_PROMPT = `Ты - помощник редактора научног
 const extractJsonFromResponse = (response) => {
   if (!response) return '{}';
 
-  let cleaned = response;
+  // FIRST: Try to find JSON in the response before any cleanup
+  // This prevents regex from accidentally deleting JSON content
 
-  // Remove <think>...</think> blocks (DeepSeek R1 reasoning) - handle unclosed tags too
-  cleaned = cleaned.replace(/<think>[\s\S]*?<\/think>/gi, '');
-  cleaned = cleaned.replace(/<think>[\s\S]*/gi, ''); // Remove unclosed think tags
+  // Look for JSON that starts after </think> or at beginning
+  let jsonContent = response;
 
-  // Remove markdown code blocks
-  cleaned = cleaned.replace(/```json\s*/gi, '');
-  cleaned = cleaned.replace(/```\s*/gi, '');
-
-  // Try to extract JSON object from text - find the last complete JSON object
-  const jsonMatches = cleaned.match(/\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/g);
-  if (jsonMatches && jsonMatches.length > 0) {
-    // Find the most complete JSON (longest one with structure key)
-    const validJson = jsonMatches.find(j => j.includes('"structure"') || j.includes('"title"'));
-    if (validJson) {
-      cleaned = validJson;
-    } else {
-      cleaned = jsonMatches[jsonMatches.length - 1];
+  // Find the last occurrence of </think> and take everything after it
+  const thinkEndIndex = response.lastIndexOf('</think>');
+  if (thinkEndIndex !== -1) {
+    jsonContent = response.substring(thinkEndIndex + 8); // 8 = length of '</think>'
+  } else {
+    // No closing think tag - try to find JSON directly
+    // Look for first { that might be JSON (after any <think> content)
+    const thinkStartIndex = response.indexOf('<think>');
+    if (thinkStartIndex !== -1) {
+      // Find JSON after the think tag or before it
+      const beforeThink = response.substring(0, thinkStartIndex);
+      const jsonInBefore = beforeThink.match(/\{[\s\S]*\}/);
+      if (jsonInBefore) {
+        jsonContent = jsonInBefore[0];
+      } else {
+        // Try to find JSON that might be mixed with incomplete think content
+        // Extract everything that looks like JSON
+        const jsonMatch = response.match(/\{[^<]*"(?:structure|title)"[\s\S]*?\}(?=\s*$|\s*<)/);
+        if (jsonMatch) {
+          jsonContent = jsonMatch[0];
+        }
+      }
     }
   }
 
-  return cleaned.trim();
+  // Clean up any remaining tags and markdown
+  let cleaned = jsonContent;
+  cleaned = cleaned.replace(/<\/?think>/gi, '');
+  cleaned = cleaned.replace(/```json\s*/gi, '');
+  cleaned = cleaned.replace(/```\s*/gi, '');
+  cleaned = cleaned.trim();
+
+  // Try to extract complete JSON object using balanced braces
+  const firstBrace = cleaned.indexOf('{');
+  if (firstBrace !== -1) {
+    let depth = 0;
+    let lastBrace = -1;
+    for (let i = firstBrace; i < cleaned.length; i++) {
+      if (cleaned[i] === '{') depth++;
+      if (cleaned[i] === '}') {
+        depth--;
+        if (depth === 0) {
+          lastBrace = i;
+          break;
+        }
+      }
+    }
+    if (lastBrace !== -1) {
+      cleaned = cleaned.substring(firstBrace, lastBrace + 1);
+    }
+  }
+
+  return cleaned || '{}';
 };
 
 /**
@@ -90,7 +126,8 @@ const makeAIRequest = async (prompt, maxTokens = 1000, useFallback = false) => {
         throw new Error("API_KEY_INVALID");
       }
 
-      if (!useFallback && (response.status === 429 || response.status >= 500)) {
+      // Retry with fallback on rate limit, server errors, or model not found (404)
+      if (!useFallback && (response.status === 404 || response.status === 429 || response.status >= 500)) {
         console.warn(`Primary model failed (${response.status}), trying fallback...`);
         return makeAIRequest(prompt, maxTokens, true);
       }
