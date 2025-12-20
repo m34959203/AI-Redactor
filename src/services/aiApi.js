@@ -21,17 +21,24 @@ const extractJsonFromResponse = (response) => {
 
   let cleaned = response;
 
-  // Remove <think>...</think> blocks (DeepSeek R1 reasoning)
+  // Remove <think>...</think> blocks (DeepSeek R1 reasoning) - handle unclosed tags too
   cleaned = cleaned.replace(/<think>[\s\S]*?<\/think>/gi, '');
+  cleaned = cleaned.replace(/<think>[\s\S]*/gi, ''); // Remove unclosed think tags
 
   // Remove markdown code blocks
   cleaned = cleaned.replace(/```json\s*/gi, '');
   cleaned = cleaned.replace(/```\s*/gi, '');
 
-  // Try to extract JSON object from text
-  const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-  if (jsonMatch) {
-    cleaned = jsonMatch[0];
+  // Try to extract JSON object from text - find the last complete JSON object
+  const jsonMatches = cleaned.match(/\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/g);
+  if (jsonMatches && jsonMatches.length > 0) {
+    // Find the most complete JSON (longest one with structure key)
+    const validJson = jsonMatches.find(j => j.includes('"structure"') || j.includes('"title"'));
+    if (validJson) {
+      cleaned = validJson;
+    } else {
+      cleaned = jsonMatches[jsonMatches.length - 1];
+    }
   }
 
   return cleaned.trim();
@@ -309,12 +316,23 @@ ${content.substring(0, 5000)}
     apiError: true
   };
 
+  // Helper to try parsing review
+  const tryParseReview = async (useFallbackModel = false) => {
+    const response = await makeAIRequest(prompt, 2500, useFallbackModel);
+    return safeJsonParse(response, null);
+  };
+
   try {
-    const response = await makeAIRequest(prompt, 2500);
-    const review = safeJsonParse(response, null);
+    let review = await tryParseReview(false);
+
+    // Retry with fallback model if first attempt failed
+    if (!review || !review.structure) {
+      console.warn('First review attempt failed, retrying with fallback model...');
+      review = await tryParseReview(true);
+    }
 
     if (!review || !review.structure) {
-      console.error('Invalid review structure, using fallback');
+      console.error('Invalid review structure after retry, using fallback');
       return { fileName, ...fallback };
     }
 
