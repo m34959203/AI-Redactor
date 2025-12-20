@@ -42,11 +42,21 @@ const getFileName = (message) => {
   return match ? match[1] : '';
 };
 
+// Extract file counts from message pattern [X/Y]
+const getFileCounts = (message) => {
+  const match = message.match(/\[(\d+)\/(\d+)\]/);
+  if (match) {
+    return { currentFile: parseInt(match[1], 10), totalFiles: parseInt(match[2], 10) };
+  }
+  return null;
+};
+
 const LoadingOverlay = ({ message = 'Обработка...', current, total }) => {
   const hasProgress = typeof current === 'number' && typeof total === 'number' && total > 0;
   const progressPercent = hasProgress ? Math.round((current / total) * 100) : 0;
   const stepInfo = getStepInfo(message);
   const fileName = getFileName(message);
+  const fileCounts = getFileCounts(message);
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
@@ -54,7 +64,7 @@ const LoadingOverlay = ({ message = 'Обработка...', current, total }) =
         {/* Progress indicator */}
         {hasProgress ? (
           <div className="mb-6">
-            {/* Circular progress with count */}
+            {/* Circular progress with file count */}
             <div className="relative w-20 h-20 mx-auto mb-4">
               <svg className="w-20 h-20 transform -rotate-90">
                 {/* Background circle */}
@@ -66,7 +76,7 @@ const LoadingOverlay = ({ message = 'Обработка...', current, total }) =
                   strokeWidth="6"
                   fill="none"
                 />
-                {/* Progress circle */}
+                {/* Progress circle - based on files if available, otherwise steps */}
                 <circle
                   cx="40"
                   cy="40"
@@ -76,14 +86,14 @@ const LoadingOverlay = ({ message = 'Обработка...', current, total }) =
                   fill="none"
                   strokeLinecap="round"
                   strokeDasharray={`${2 * Math.PI * 36}`}
-                  strokeDashoffset={`${2 * Math.PI * 36 * (1 - current / total)}`}
+                  strokeDashoffset={`${2 * Math.PI * 36 * (1 - (fileCounts ? fileCounts.currentFile / fileCounts.totalFiles : current / total))}`}
                   className="transition-all duration-300"
                 />
               </svg>
-              {/* Counter in center */}
+              {/* File counter in center */}
               <div className="absolute inset-0 flex items-center justify-center">
                 <span className="text-xl font-bold text-indigo-600">
-                  {current}/{total}
+                  {fileCounts ? `${fileCounts.currentFile}/${fileCounts.totalFiles}` : `${current}/${total}`}
                 </span>
               </div>
             </div>
@@ -94,14 +104,19 @@ const LoadingOverlay = ({ message = 'Обработка...', current, total }) =
               <span className="text-sm font-medium">{stepInfo.label}</span>
             </div>
 
-            {/* Progress bar */}
+            {/* Progress bar - shows overall step progress */}
             <div className="w-full bg-gray-200 rounded-full h-2.5 overflow-hidden mb-2">
               <div
                 className="bg-gradient-to-r from-indigo-500 to-purple-600 h-2.5 rounded-full transition-all duration-300"
                 style={{ width: `${progressPercent}%` }}
               />
             </div>
-            <p className="text-sm text-gray-500">Шаг {current} из {total} • {progressPercent}%</p>
+            <p className="text-sm text-gray-500">
+              {fileCounts
+                ? `Файл ${fileCounts.currentFile} из ${fileCounts.totalFiles} • ${progressPercent}%`
+                : `${progressPercent}%`
+              }
+            </p>
           </div>
         ) : (
           <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-indigo-600 mx-auto mb-4" />
