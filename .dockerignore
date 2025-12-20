@@ -1,0 +1,40 @@
+# Dependencies
+node_modules
+server/node_modules
+
+# Build output
+dist
+
+# Development files
+.git
+.gitignore
+*.md
+.env
+.env.*
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Test
+coverage
+.nyc_output
+
+# Temp files
+server/temp/*
+!server/temp/.gitkeep
+
+# Docker files (not needed in container)
+docker-compose.yml
+Dockerfile.frontend
+Dockerfile.production

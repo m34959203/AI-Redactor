@@ -14,7 +14,7 @@ import { useApp, useNotifications, useProcessing } from './context/AppContext';
 import { extractMetadataWithAI, checkSpelling, reviewArticle } from './services/aiApi';
 import { validatePageFile, validateArticleFile } from './utils/fileValidation';
 import { detectLanguage, sortArticlesByLanguage } from './utils/languageDetection';
-import { validatePdfRequirements, createIssue, generatePDF, downloadPDF } from './utils/pdfGenerator';
+import { validatePdfRequirements, createIssue, generatePDF, generatePDFSmart, downloadPDF } from './utils/pdfGenerator';
 import { convertDocxToText } from './utils/docxConverter';
 import { addToArchive, getPdfBlob, removeFromArchive } from './utils/archiveStorage';
 
@@ -200,7 +200,7 @@ const App = () => {
     try {
       const issue = createIssue(articles, coverPage, descriptionPage, finalPage);
 
-      const pdfBlob = await generatePDF(
+      const { blob: pdfBlob } = await generatePDFSmart(
         issue,
         articles,
         coverPage,

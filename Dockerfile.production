@@ -1,0 +1,70 @@
+# AI-Redactor Production Build (Full Stack)
+FROM node:20-slim AS frontend-builder
+
+WORKDIR /app
+
+# Copy frontend package files
+COPY package*.json ./
+RUN npm ci
+
+# Copy frontend source and build
+COPY . .
+RUN npm run build
+
+
+# Production image with LibreOffice
+FROM node:20-slim
+
+# Install LibreOffice, Nginx and PDF tools
+RUN apt-get update && apt-get install -y \
+    libreoffice \
+    poppler-utils \
+    nginx \
+    fonts-liberation \
+    fonts-dejavu \
+    fonts-freefont-ttf \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy server files
+COPY server/package*.json ./server/
+RUN cd server && npm ci --only=production
+
+COPY server/ ./server/
+
+# Copy built frontend
+COPY --from=frontend-builder /app/dist /var/www/html
+
+# Nginx configuration
+RUN echo 'server { \n\
+    listen 80; \n\
+    server_name localhost; \n\
+    \n\
+    location / { \n\
+        root /var/www/html; \n\
+        index index.html; \n\
+        try_files $uri $uri/ /index.html; \n\
+    } \n\
+    \n\
+    location /api { \n\
+        proxy_pass http://127.0.0.1:3001; \n\
+        proxy_http_version 1.1; \n\
+        proxy_set_header Upgrade $http_upgrade; \n\
+        proxy_set_header Connection "upgrade"; \n\
+        proxy_set_header Host $host; \n\
+        proxy_set_header X-Real-IP $remote_addr; \n\
+        client_max_body_size 100M; \n\
+    } \n\
+}' > /etc/nginx/sites-available/default
+
+# Create temp directory
+RUN mkdir -p /app/server/temp && chmod 777 /app/server/temp
+
+# Start script
+RUN echo '#!/bin/bash \n\
+nginx && node /app/server/index.js' > /app/start.sh && chmod +x /app/start.sh
+
+EXPOSE 80 3001
+
+CMD ["/app/start.sh"]

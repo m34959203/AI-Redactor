@@ -1,10 +1,12 @@
 /**
  * PDF generation utilities using jsPDF
+ * Supports both client-side (jsPDF) and server-side (LibreOffice) generation
  */
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
 import { convertDocxToHtml, readFileAsArrayBuffer } from './docxConverter';
 import { registerCyrillicFont, getFontName, preloadFonts } from './fontLoader';
+import { checkServerHealth, generateJournalPdf } from './apiService';
 
 // Constants (based on "Вестник ЖезУ" journal requirements)
 const PAGE_WIDTH = 210; // A4 width in mm
@@ -447,8 +449,29 @@ const renderHtmlAsImage = async (doc, html, startY, startPage) => {
     .docx-content img {
       max-width: 100%;
       height: auto;
+    }
+    .docx-content img:not(.float-left):not(.float-right) {
       display: block;
       margin: 1em auto;
+    }
+    .docx-content img.float-left {
+      float: left;
+      margin: 0 1em 0.5em 0;
+      max-width: 45%;
+    }
+    .docx-content img.float-right {
+      float: right;
+      margin: 0 0 0.5em 1em;
+      max-width: 45%;
+    }
+    .docx-content p:has(img.float-left),
+    .docx-content p:has(img.float-right) {
+      overflow: hidden;
+    }
+    .docx-content::after {
+      content: "";
+      display: table;
+      clear: both;
     }
     .docx-content table {
       width: 100%;
@@ -477,6 +500,11 @@ const renderHtmlAsImage = async (doc, html, startY, startPage) => {
     .docx-content strong, .docx-content b { font-weight: bold; }
     .docx-content em, .docx-content i { font-style: italic; }
     .docx-content u { text-decoration: underline; }
+    /* Author info styling - typically italic text near photo */
+    .docx-content p > em:only-child,
+    .docx-content p > i:only-child {
+      display: block;
+    }
     .docx-content ul, .docx-content ol {
       margin: 0.5em 0;
       padding-left: 2em;
@@ -877,6 +905,56 @@ export const downloadPDF = (pdfBlob, fileName) => {
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
+};
+
+/**
+ * Smart PDF generation - uses server (LibreOffice) for 100% Word formatting accuracy
+ *
+ * @param {Object} issue - Issue data
+ * @param {Array} articles - Full articles array with files
+ * @param {Object} coverPage - Cover page data
+ * @param {Object} descriptionPage - Description page data
+ * @param {Object} finalPage - Final page data
+ * @param {Function} onProgress - Progress callback
+ * @returns {Promise<{blob: Blob, method: 'server'}>}
+ */
+export const generatePDFSmart = async (issue, articles, coverPage, descriptionPage, finalPage, onProgress = () => {}) => {
+  // Check if server is available
+  onProgress({ step: 0, total: 5, message: 'Проверка сервера конвертации...' });
+
+  const serverStatus = await checkServerHealth();
+
+  if (!serverStatus.available) {
+    throw new Error('Сервер конвертации недоступен. Запустите сервер: cd server && npm start');
+  }
+
+  if (!serverStatus.libreOffice) {
+    throw new Error('LibreOffice не установлен на сервере. Установите: sudo apt install libreoffice');
+  }
+
+  // Use server-side generation with LibreOffice (100% formatting accuracy)
+  console.log('Using server-side PDF generation (LibreOffice)');
+  onProgress({ step: 1, total: 5, message: 'Конвертация через LibreOffice...' });
+
+  const pdfBlob = await generateJournalPdf(
+    { coverPage, descriptionPage, articles, finalPage },
+    (progress) => onProgress({
+      step: progress.step + 1,
+      total: 5,
+      message: progress.message
+    })
+  );
+
+  return { blob: pdfBlob, method: 'server' };
+};
+
+/**
+ * Check if server-side PDF generation is available
+ * @returns {Promise<boolean>}
+ */
+export const isServerGenerationAvailable = async () => {
+  const status = await checkServerHealth();
+  return status.available && status.libreOffice;
 };
 
 /**
