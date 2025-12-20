@@ -484,6 +484,15 @@ const renderHtmlAsImage = async (doc, html, startY, startPage) => {
     .docx-content li {
       margin: 0.25em 0;
     }
+    .docx-content p,
+    .docx-content li,
+    .docx-content h1,
+    .docx-content h2,
+    .docx-content h3 {
+      orphans: 3;
+      widows: 3;
+      page-break-inside: avoid;
+    }
   `;
 
   container.appendChild(styleElement);
@@ -521,6 +530,11 @@ const renderHtmlAsImage = async (doc, html, startY, startPage) => {
     const imgWidth = CONTENT_WIDTH;
     const imgHeight = (canvas.height * imgWidth) / canvas.width;
 
+    // Line height in pixels (12pt * 1.5 line-height * scale 2 = ~36px)
+    const lineHeightPx = 36;
+    // Convert to mm for PDF
+    const lineHeightMm = (lineHeightPx * imgWidth) / canvas.width;
+
     // Split into pages if content is too tall
     let remainingHeight = imgHeight;
     let sourceY = 0;
@@ -535,7 +549,15 @@ const renderHtmlAsImage = async (doc, html, startY, startPage) => {
       }
 
       const availableHeight = PAGE_HEIGHT - MARGIN_BOTTOM - currentY;
-      const heightToDraw = Math.min(remainingHeight, availableHeight);
+      let heightToDraw = Math.min(remainingHeight, availableHeight);
+
+      // Round down to complete lines to avoid cutting text mid-line
+      if (remainingHeight > heightToDraw && lineHeightMm > 0) {
+        const numLines = Math.floor(heightToDraw / lineHeightMm);
+        if (numLines > 0) {
+          heightToDraw = numLines * lineHeightMm;
+        }
+      }
 
       // Calculate source rectangle from canvas
       const sourceHeight = (heightToDraw / imgWidth) * canvas.width;
@@ -543,18 +565,18 @@ const renderHtmlAsImage = async (doc, html, startY, startPage) => {
       // Create a temporary canvas for this portion
       const tempCanvas = document.createElement('canvas');
       tempCanvas.width = canvas.width;
-      tempCanvas.height = sourceHeight;
+      tempCanvas.height = Math.ceil(sourceHeight);
       const tempCtx = tempCanvas.getContext('2d');
       tempCtx.drawImage(
         canvas,
-        0, sourceY, canvas.width, sourceHeight,
-        0, 0, canvas.width, sourceHeight
+        0, sourceY, canvas.width, Math.ceil(sourceHeight),
+        0, 0, canvas.width, Math.ceil(sourceHeight)
       );
 
       const partImgData = tempCanvas.toDataURL('image/jpeg', 0.95);
       doc.addImage(partImgData, 'JPEG', MARGIN_LEFT, currentY, imgWidth, heightToDraw);
 
-      sourceY += sourceHeight;
+      sourceY += Math.ceil(sourceHeight);
       remainingHeight -= heightToDraw;
       currentY += heightToDraw;
 
