@@ -4,7 +4,7 @@
 
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 MB
 const ALLOWED_ARTICLE_TYPES = ['.docx'];
-const ALLOWED_PAGE_TYPES = ['.docx', '.pdf'];
+const ALLOWED_PAGE_TYPES = ['.docx', '.doc', '.pdf'];
 
 /**
  * Validates article file

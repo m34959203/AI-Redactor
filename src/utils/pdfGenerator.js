@@ -133,7 +133,7 @@ const addEmptyLinesBeforeArticle = (doc, currentY) => {
  * @param {string} html - HTML content
  * @param {number} startY - Starting Y position
  * @param {number} startPage - Starting page number
- * @returns {{endY: number, endPage: number}}
+ * @returns {{endY: number, endPage: number, hasContent: boolean}}
  */
 const renderHtmlToPdf = (doc, html, startY, startPage) => {
   // Strip HTML tags and get plain text
@@ -143,14 +143,20 @@ const renderHtmlToPdf = (doc, html, startY, startPage) => {
 
   let currentY = startY;
   let currentPage = startPage;
+  let hasContent = false;
 
+  // Ensure font is set
+  const fontName = getFontName();
+  doc.setFont(fontName, 'normal');
   doc.setFontSize(FONT_SIZE);
+  doc.setTextColor(0, 0, 0);
 
   const paragraphs = text.split(/\n\n+/);
 
   for (const paragraph of paragraphs) {
     if (!paragraph.trim()) continue;
 
+    hasContent = true;
     const lines = splitTextToLines(doc, paragraph.trim(), CONTENT_WIDTH);
 
     for (const line of lines) {
@@ -168,7 +174,7 @@ const renderHtmlToPdf = (doc, html, startY, startPage) => {
     currentY += LINE_HEIGHT / 2; // Paragraph spacing
   }
 
-  return { endY: currentY, endPage: currentPage };
+  return { endY: currentY, endPage: currentPage, hasContent };
 };
 
 /**
@@ -176,32 +182,74 @@ const renderHtmlToPdf = (doc, html, startY, startPage) => {
  * @param {jsPDF} doc - jsPDF instance
  * @param {Object} pageData - Page data with file
  * @param {number} pageNum - Current page number
+ * @param {string} pageName - Name of the page type for error messages
  * @returns {Promise<number>} - New page number
  */
-const addSpecialPage = async (doc, pageData, pageNum) => {
-  if (!pageData || !pageData.file) return pageNum;
+const addSpecialPage = async (doc, pageData, pageNum, pageName = 'страница') => {
+  const fontName = getFontName();
 
-  try {
-    if (pageData.type === '.pdf') {
-      // For PDF files, we add a placeholder page (full PDF embedding requires pdf-lib)
-      doc.setFontSize(12);
-      doc.text(`[Содержимое файла: ${pageData.name}]`, MARGIN_LEFT, MARGIN_TOP);
-      doc.text('(PDF файл будет интегрирован)', MARGIN_LEFT, MARGIN_TOP + LINE_HEIGHT);
-      addPageNumber(doc, pageNum);
-      return pageNum;
-    } else if (pageData.type === '.docx') {
-      const { html } = await convertDocxToHtml(pageData.file);
-      const result = renderHtmlToPdf(doc, html, MARGIN_TOP, pageNum);
-      addPageNumber(doc, result.endPage);
-      return result.endPage;
-    }
-  } catch (error) {
-    console.error('Error adding special page:', error);
-    doc.text(`Ошибка загрузки: ${pageData.name}`, MARGIN_LEFT, MARGIN_TOP);
+  // Ensure font is set for this page
+  doc.setFont(fontName, 'normal');
+  doc.setFontSize(FONT_SIZE);
+  doc.setTextColor(0, 0, 0);
+
+  if (!pageData || !pageData.file) {
+    console.warn(`Special page missing: ${pageName}`);
+    doc.text(`[${pageName} не загружен]`, MARGIN_LEFT, MARGIN_TOP);
     addPageNumber(doc, pageNum);
+    return pageNum;
   }
 
-  return pageNum;
+  const fileType = (pageData.type || '').toLowerCase();
+  console.log(`Adding special page: ${pageName}, type: ${fileType}, file: ${pageData.name}`);
+
+  try {
+    if (fileType === '.pdf') {
+      // For PDF files, we add a placeholder page (full PDF embedding requires pdf-lib)
+      doc.setFont(fontName, 'bold');
+      doc.setFontSize(14);
+      doc.text(`[Содержимое из PDF: ${pageData.name}]`, MARGIN_LEFT, MARGIN_TOP);
+      doc.setFont(fontName, 'normal');
+      doc.setFontSize(11);
+      doc.text('(PDF файлы рекомендуется загружать в формате .docx для полной интеграции)', MARGIN_LEFT, MARGIN_TOP + LINE_HEIGHT * 2);
+      addPageNumber(doc, pageNum);
+      return pageNum;
+    } else if (fileType === '.docx' || fileType === '.doc') {
+      const { html } = await convertDocxToHtml(pageData.file);
+
+      if (!html || html.trim() === '') {
+        console.warn(`Empty HTML content for ${pageName}: ${pageData.name}`);
+        doc.text(`[Файл ${pageData.name} не содержит текста]`, MARGIN_LEFT, MARGIN_TOP);
+        addPageNumber(doc, pageNum);
+        return pageNum;
+      }
+
+      const result = renderHtmlToPdf(doc, html, MARGIN_TOP, pageNum);
+
+      if (!result.hasContent) {
+        console.warn(`No rendered content for ${pageName}: ${pageData.name}`);
+        doc.text(`[Не удалось извлечь текст из ${pageData.name}]`, MARGIN_LEFT, MARGIN_TOP);
+      }
+
+      addPageNumber(doc, result.endPage);
+      return result.endPage;
+    } else {
+      // Unknown file type
+      console.warn(`Unknown file type for ${pageName}: ${fileType}`);
+      doc.text(`[Неподдерживаемый формат файла: ${pageData.name}]`, MARGIN_LEFT, MARGIN_TOP);
+      doc.text('Поддерживаемые форматы: .docx, .pdf', MARGIN_LEFT, MARGIN_TOP + LINE_HEIGHT);
+      addPageNumber(doc, pageNum);
+      return pageNum;
+    }
+  } catch (error) {
+    console.error(`Error adding special page ${pageName}:`, error);
+    doc.setFont(fontName, 'normal');
+    doc.setFontSize(FONT_SIZE);
+    doc.text(`Ошибка загрузки: ${pageData.name}`, MARGIN_LEFT, MARGIN_TOP);
+    doc.text(`Причина: ${error.message}`, MARGIN_LEFT, MARGIN_TOP + LINE_HEIGHT);
+    addPageNumber(doc, pageNum);
+    return pageNum;
+  }
 };
 
 /**
@@ -290,13 +338,13 @@ export const generatePDF = async (issue, articles, coverPage, descriptionPage, f
   try {
     // 1. Cover page
     onProgress({ step: ++currentStep, total: totalSteps, message: 'Добавление титульного листа...' });
-    currentPage = await addSpecialPage(doc, coverPage, currentPage);
+    currentPage = await addSpecialPage(doc, coverPage, currentPage, 'Титульный лист');
 
     // 2. Description page
     onProgress({ step: ++currentStep, total: totalSteps, message: 'Добавление описания журнала...' });
     doc.addPage();
     currentPage++;
-    currentPage = await addSpecialPage(doc, descriptionPage, currentPage);
+    currentPage = await addSpecialPage(doc, descriptionPage, currentPage, 'Описание и редакция');
 
     // 3. Articles
     for (let i = 0; i < articles.length; i++) {
@@ -370,7 +418,7 @@ export const generatePDF = async (issue, articles, coverPage, descriptionPage, f
     onProgress({ step: totalSteps, total: totalSteps, message: 'Добавление заключительной страницы...' });
     doc.addPage();
     currentPage++;
-    currentPage = await addSpecialPage(doc, finalPage, currentPage);
+    currentPage = await addSpecialPage(doc, finalPage, currentPage, 'Заключительная страница');
 
     // Generate blob
     const pdfBlob = doc.output('blob');
