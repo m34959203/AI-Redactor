@@ -4,13 +4,28 @@
 import mammoth from 'mammoth';
 
 /**
- * Converts a DOCX file to HTML
+ * Converts a DOCX file to HTML with images embedded as base64
  * @param {File} file - DOCX file to convert
- * @returns {Promise<{html: string, messages: Array}>}
+ * @returns {Promise<{html: string, messages: Array, images: Array}>}
  */
 export const convertDocxToHtml = async (file) => {
   try {
     const arrayBuffer = await file.arrayBuffer();
+    const images = [];
+
+    // Custom image converter that embeds images as base64
+    const convertImage = mammoth.images.imgElement(function(image) {
+      return image.read("base64").then(function(imageBuffer) {
+        const dataUri = `data:${image.contentType};base64,${imageBuffer}`;
+        images.push({
+          contentType: image.contentType,
+          dataUri: dataUri
+        });
+        return {
+          src: dataUri
+        };
+      });
+    });
 
     const result = await mammoth.convertToHtml(
       { arrayBuffer },
@@ -23,13 +38,15 @@ export const convertDocxToHtml = async (file) => {
           "b => strong",
           "i => em",
           "u => u"
-        ]
+        ],
+        convertImage: convertImage
       }
     );
 
     return {
       html: result.value,
-      messages: result.messages
+      messages: result.messages,
+      images: images
     };
   } catch (error) {
     console.error('DOCX conversion error:', error);

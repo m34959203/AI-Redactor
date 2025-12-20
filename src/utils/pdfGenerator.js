@@ -2,6 +2,7 @@
  * PDF generation utilities using jsPDF
  */
 import { jsPDF } from 'jspdf';
+import html2canvas from 'html2canvas';
 import { convertDocxToHtml, readFileAsArrayBuffer } from './docxConverter';
 import { registerCyrillicFont, getFontName, preloadFonts } from './fontLoader';
 
@@ -19,6 +20,9 @@ const EMPTY_LINES_BEFORE_ARTICLE = 4;
 
 // Preload fonts at module load
 preloadFonts();
+
+// Content dimensions for images
+const CONTENT_HEIGHT = PAGE_HEIGHT - MARGIN_TOP - MARGIN_BOTTOM;
 
 /**
  * Validates if all required pages are uploaded
@@ -133,7 +137,7 @@ const addEmptyLinesBeforeArticle = (doc, currentY) => {
  * @param {string} html - HTML content
  * @param {number} startY - Starting Y position
  * @param {number} startPage - Starting page number
- * @returns {{endY: number, endPage: number}}
+ * @returns {{endY: number, endPage: number, hasContent: boolean}}
  */
 const renderHtmlToPdf = (doc, html, startY, startPage) => {
   // Strip HTML tags and get plain text
@@ -143,14 +147,20 @@ const renderHtmlToPdf = (doc, html, startY, startPage) => {
 
   let currentY = startY;
   let currentPage = startPage;
+  let hasContent = false;
 
+  // Ensure font is set
+  const fontName = getFontName();
+  doc.setFont(fontName, 'normal');
   doc.setFontSize(FONT_SIZE);
+  doc.setTextColor(0, 0, 0);
 
   const paragraphs = text.split(/\n\n+/);
 
   for (const paragraph of paragraphs) {
     if (!paragraph.trim()) continue;
 
+    hasContent = true;
     const lines = splitTextToLines(doc, paragraph.trim(), CONTENT_WIDTH);
 
     for (const line of lines) {
@@ -168,7 +178,407 @@ const renderHtmlToPdf = (doc, html, startY, startPage) => {
     currentY += LINE_HEIGHT / 2; // Paragraph spacing
   }
 
-  return { endY: currentY, endPage: currentPage };
+  return { endY: currentY, endPage: currentPage, hasContent };
+};
+
+/**
+ * Renders HTML content with images to PDF
+ * @param {jsPDF} doc - jsPDF instance
+ * @param {string} html - HTML content with embedded images
+ * @param {number} startY - Starting Y position
+ * @param {number} startPage - Starting page number
+ * @returns {{endY: number, endPage: number, hasContent: boolean}}
+ */
+const renderHtmlWithImagesToPdf = (doc, html, startY, startPage) => {
+  const tempDiv = document.createElement('div');
+  tempDiv.innerHTML = html;
+
+  let currentY = startY;
+  let currentPage = startPage;
+  let hasContent = false;
+
+  const fontName = getFontName();
+  doc.setFont(fontName, 'normal');
+  doc.setFontSize(FONT_SIZE);
+  doc.setTextColor(0, 0, 0);
+
+  // Process all child nodes (text and images)
+  const processNode = (node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = node.textContent.trim();
+      if (text) {
+        hasContent = true;
+        const lines = splitTextToLines(doc, text, CONTENT_WIDTH);
+        for (const line of lines) {
+          if (currentY + LINE_HEIGHT > PAGE_HEIGHT - MARGIN_BOTTOM) {
+            addPageNumber(doc, currentPage);
+            doc.addPage();
+            currentPage++;
+            currentY = MARGIN_TOP;
+          }
+          doc.text(line, MARGIN_LEFT, currentY);
+          currentY += LINE_HEIGHT;
+        }
+      }
+    } else if (node.nodeType === Node.ELEMENT_NODE) {
+      if (node.tagName === 'IMG') {
+        const src = node.getAttribute('src');
+        if (src && src.startsWith('data:')) {
+          hasContent = true;
+          try {
+            // Calculate image dimensions to fit within content area
+            const img = new Image();
+            img.src = src;
+
+            // Default dimensions if we can't determine actual size
+            let imgWidth = CONTENT_WIDTH;
+            let imgHeight = CONTENT_HEIGHT;
+
+            // Try to get actual dimensions from the data URI
+            // For now, use full page width and proportional height
+            const maxWidth = CONTENT_WIDTH;
+            const maxHeight = CONTENT_HEIGHT - (currentY - MARGIN_TOP);
+
+            // If image is too tall for remaining space, start new page
+            if (maxHeight < 50) {
+              addPageNumber(doc, currentPage);
+              doc.addPage();
+              currentPage++;
+              currentY = MARGIN_TOP;
+            }
+
+            // Scale to fit content width, maintaining aspect ratio
+            imgWidth = maxWidth;
+            imgHeight = maxWidth * 0.75; // Default 4:3 aspect ratio
+
+            // Ensure image doesn't exceed available height
+            const availableHeight = PAGE_HEIGHT - MARGIN_BOTTOM - currentY;
+            if (imgHeight > availableHeight) {
+              imgHeight = availableHeight;
+              imgWidth = imgHeight / 0.75;
+            }
+
+            // Determine image format from data URI
+            let format = 'JPEG';
+            if (src.includes('image/png')) {
+              format = 'PNG';
+            } else if (src.includes('image/gif')) {
+              format = 'GIF';
+            }
+
+            // Add image to PDF
+            doc.addImage(src, format, MARGIN_LEFT, currentY, imgWidth, imgHeight);
+            currentY += imgHeight + LINE_HEIGHT;
+
+          } catch (imgError) {
+            console.error('Error adding image to PDF:', imgError);
+            doc.text('[Ошибка загрузки изображения]', MARGIN_LEFT, currentY);
+            currentY += LINE_HEIGHT;
+          }
+        }
+      } else if (node.tagName === 'P' || node.tagName === 'DIV') {
+        // Process paragraph children
+        for (const child of node.childNodes) {
+          processNode(child);
+        }
+        currentY += LINE_HEIGHT / 2; // Paragraph spacing
+      } else if (node.tagName === 'H1' || node.tagName === 'H2' || node.tagName === 'H3') {
+        // Handle headings with bold font
+        doc.setFont(fontName, 'bold');
+        const fontSize = node.tagName === 'H1' ? 16 : node.tagName === 'H2' ? 14 : 13;
+        doc.setFontSize(fontSize);
+
+        const text = node.textContent.trim();
+        if (text) {
+          hasContent = true;
+          const lines = splitTextToLines(doc, text, CONTENT_WIDTH);
+          for (const line of lines) {
+            if (currentY + LINE_HEIGHT > PAGE_HEIGHT - MARGIN_BOTTOM) {
+              addPageNumber(doc, currentPage);
+              doc.addPage();
+              currentPage++;
+              currentY = MARGIN_TOP;
+            }
+            doc.text(line, MARGIN_LEFT, currentY);
+            currentY += LINE_HEIGHT * 1.2;
+          }
+        }
+
+        doc.setFont(fontName, 'normal');
+        doc.setFontSize(FONT_SIZE);
+        currentY += LINE_HEIGHT / 2;
+      } else if (node.tagName === 'TABLE') {
+        // Handle tables
+        hasContent = true;
+        const rows = node.querySelectorAll('tr');
+        if (rows.length === 0) return;
+
+        // Calculate column widths based on number of columns in first row
+        const firstRow = rows[0];
+        const colCount = firstRow.querySelectorAll('td, th').length || 1;
+        const colWidth = CONTENT_WIDTH / colCount;
+        const cellPadding = 2;
+        const rowHeight = LINE_HEIGHT * 1.5;
+
+        // Check if table fits on current page, otherwise start new page
+        const estimatedTableHeight = rows.length * rowHeight;
+        if (currentY + Math.min(estimatedTableHeight, 50) > PAGE_HEIGHT - MARGIN_BOTTOM) {
+          addPageNumber(doc, currentPage);
+          doc.addPage();
+          currentPage++;
+          currentY = MARGIN_TOP;
+        }
+
+        doc.setFontSize(10); // Smaller font for tables
+        const tableStartY = currentY;
+
+        rows.forEach((row, rowIndex) => {
+          const cells = row.querySelectorAll('td, th');
+          const isHeader = row.querySelectorAll('th').length > 0;
+
+          // Check if we need a new page for this row
+          if (currentY + rowHeight > PAGE_HEIGHT - MARGIN_BOTTOM) {
+            addPageNumber(doc, currentPage);
+            doc.addPage();
+            currentPage++;
+            currentY = MARGIN_TOP;
+          }
+
+          // Draw row background for header
+          if (isHeader) {
+            doc.setFillColor(240, 240, 240);
+            doc.rect(MARGIN_LEFT, currentY - 1, CONTENT_WIDTH, rowHeight, 'F');
+            doc.setFont(fontName, 'bold');
+          } else {
+            doc.setFont(fontName, 'normal');
+          }
+
+          // Draw cells
+          cells.forEach((cell, cellIndex) => {
+            const cellX = MARGIN_LEFT + (cellIndex * colWidth);
+            const cellText = cell.textContent.trim();
+
+            // Draw cell border
+            doc.setDrawColor(180, 180, 180);
+            doc.rect(cellX, currentY - 1, colWidth, rowHeight);
+
+            // Draw cell text (truncate if too long)
+            if (cellText) {
+              const maxTextWidth = colWidth - (cellPadding * 2);
+              let displayText = cellText;
+              while (doc.getTextWidth(displayText) > maxTextWidth && displayText.length > 3) {
+                displayText = displayText.slice(0, -4) + '...';
+              }
+              doc.text(displayText, cellX + cellPadding, currentY + LINE_HEIGHT * 0.8);
+            }
+          });
+
+          currentY += rowHeight;
+        });
+
+        doc.setFontSize(FONT_SIZE);
+        doc.setFont(fontName, 'normal');
+        currentY += LINE_HEIGHT; // Space after table
+      } else {
+        // Process other elements recursively
+        for (const child of node.childNodes) {
+          processNode(child);
+        }
+      }
+    }
+  };
+
+  // Process all top-level children
+  for (const child of tempDiv.childNodes) {
+    processNode(child);
+  }
+
+  return { endY: currentY, endPage: currentPage, hasContent };
+};
+
+/**
+ * Renders HTML content as image to preserve original Word formatting
+ * @param {jsPDF} doc - jsPDF instance
+ * @param {string} html - HTML content from DOCX
+ * @param {number} startY - Starting Y position
+ * @param {number} startPage - Starting page number
+ * @returns {Promise<{endY: number, endPage: number, hasContent: boolean}>}
+ */
+const renderHtmlAsImage = async (doc, html, startY, startPage) => {
+  let currentY = startY;
+  let currentPage = startPage;
+  let hasContent = false;
+
+  if (!html || html.trim() === '') {
+    return { endY: currentY, endPage: currentPage, hasContent };
+  }
+
+  // Create a hidden container for rendering
+  const container = document.createElement('div');
+  container.style.cssText = `
+    position: absolute;
+    left: -9999px;
+    top: 0;
+    width: 160mm;
+    padding: 0;
+    margin: 0;
+    background: white;
+    font-family: 'Times New Roman', Times, serif;
+    font-size: 12pt;
+    line-height: 1.5;
+    color: black;
+  `;
+
+  // Add styles for proper rendering
+  const styleElement = document.createElement('style');
+  styleElement.textContent = `
+    .docx-content * {
+      max-width: 100%;
+      box-sizing: border-box;
+    }
+    .docx-content p {
+      margin: 0 0 0.5em 0;
+      text-align: justify;
+      text-indent: 1.25cm;
+    }
+    .docx-content p:first-child {
+      text-indent: 0;
+    }
+    .docx-content img {
+      max-width: 100%;
+      height: auto;
+      display: block;
+      margin: 1em auto;
+    }
+    .docx-content table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1em 0;
+      font-size: 10pt;
+    }
+    .docx-content table, .docx-content th, .docx-content td {
+      border: 1px solid #333;
+    }
+    .docx-content th, .docx-content td {
+      padding: 4px 8px;
+      text-align: left;
+    }
+    .docx-content th {
+      background-color: #f0f0f0;
+      font-weight: bold;
+    }
+    .docx-content h1, .docx-content h2, .docx-content h3 {
+      margin: 1em 0 0.5em 0;
+      font-weight: bold;
+    }
+    .docx-content h1 { font-size: 16pt; }
+    .docx-content h2 { font-size: 14pt; }
+    .docx-content h3 { font-size: 13pt; }
+    .docx-content strong, .docx-content b { font-weight: bold; }
+    .docx-content em, .docx-content i { font-style: italic; }
+    .docx-content u { text-decoration: underline; }
+    .docx-content ul, .docx-content ol {
+      margin: 0.5em 0;
+      padding-left: 2em;
+    }
+    .docx-content li {
+      margin: 0.25em 0;
+    }
+  `;
+
+  container.appendChild(styleElement);
+
+  const contentDiv = document.createElement('div');
+  contentDiv.className = 'docx-content';
+  contentDiv.innerHTML = html;
+  container.appendChild(contentDiv);
+
+  document.body.appendChild(container);
+
+  try {
+    // Wait for images to load
+    const images = container.querySelectorAll('img');
+    await Promise.all(Array.from(images).map(img => {
+      if (img.complete) return Promise.resolve();
+      return new Promise((resolve) => {
+        img.onload = resolve;
+        img.onerror = resolve;
+      });
+    }));
+
+    // Render to canvas
+    const canvas = await html2canvas(container, {
+      scale: 2, // Higher quality
+      useCORS: true,
+      allowTaint: true,
+      backgroundColor: '#ffffff',
+      logging: false
+    });
+
+    hasContent = true;
+
+    // Calculate dimensions
+    const imgWidth = CONTENT_WIDTH;
+    const imgHeight = (canvas.height * imgWidth) / canvas.width;
+
+    // Split into pages if content is too tall
+    let remainingHeight = imgHeight;
+    let sourceY = 0;
+
+    while (remainingHeight > 0) {
+      // Check if we need a new page
+      if (currentY > MARGIN_TOP && currentY + Math.min(remainingHeight, 50) > PAGE_HEIGHT - MARGIN_BOTTOM) {
+        addPageNumber(doc, currentPage);
+        doc.addPage();
+        currentPage++;
+        currentY = MARGIN_TOP;
+      }
+
+      const availableHeight = PAGE_HEIGHT - MARGIN_BOTTOM - currentY;
+      const heightToDraw = Math.min(remainingHeight, availableHeight);
+
+      // Calculate source rectangle from canvas
+      const sourceHeight = (heightToDraw / imgWidth) * canvas.width;
+
+      // Create a temporary canvas for this portion
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = canvas.width;
+      tempCanvas.height = sourceHeight;
+      const tempCtx = tempCanvas.getContext('2d');
+      tempCtx.drawImage(
+        canvas,
+        0, sourceY, canvas.width, sourceHeight,
+        0, 0, canvas.width, sourceHeight
+      );
+
+      const partImgData = tempCanvas.toDataURL('image/jpeg', 0.95);
+      doc.addImage(partImgData, 'JPEG', MARGIN_LEFT, currentY, imgWidth, heightToDraw);
+
+      sourceY += sourceHeight;
+      remainingHeight -= heightToDraw;
+      currentY += heightToDraw;
+
+      if (remainingHeight > 0) {
+        addPageNumber(doc, currentPage);
+        doc.addPage();
+        currentPage++;
+        currentY = MARGIN_TOP;
+      }
+    }
+
+  } catch (error) {
+    console.error('Error rendering HTML as image:', error);
+    // Fallback to text rendering
+    const fontName = getFontName();
+    doc.setFont(fontName, 'normal');
+    doc.setFontSize(FONT_SIZE);
+    doc.text('[Ошибка рендеринга контента]', MARGIN_LEFT, currentY);
+    currentY += LINE_HEIGHT;
+  } finally {
+    document.body.removeChild(container);
+  }
+
+  return { endY: currentY, endPage: currentPage, hasContent };
 };
 
 /**
@@ -176,32 +586,77 @@ const renderHtmlToPdf = (doc, html, startY, startPage) => {
  * @param {jsPDF} doc - jsPDF instance
  * @param {Object} pageData - Page data with file
  * @param {number} pageNum - Current page number
+ * @param {string} pageName - Name of the page type for error messages
  * @returns {Promise<number>} - New page number
  */
-const addSpecialPage = async (doc, pageData, pageNum) => {
-  if (!pageData || !pageData.file) return pageNum;
+const addSpecialPage = async (doc, pageData, pageNum, pageName = 'страница') => {
+  const fontName = getFontName();
 
-  try {
-    if (pageData.type === '.pdf') {
-      // For PDF files, we add a placeholder page (full PDF embedding requires pdf-lib)
-      doc.setFontSize(12);
-      doc.text(`[Содержимое файла: ${pageData.name}]`, MARGIN_LEFT, MARGIN_TOP);
-      doc.text('(PDF файл будет интегрирован)', MARGIN_LEFT, MARGIN_TOP + LINE_HEIGHT);
-      addPageNumber(doc, pageNum);
-      return pageNum;
-    } else if (pageData.type === '.docx') {
-      const { html } = await convertDocxToHtml(pageData.file);
-      const result = renderHtmlToPdf(doc, html, MARGIN_TOP, pageNum);
-      addPageNumber(doc, result.endPage);
-      return result.endPage;
-    }
-  } catch (error) {
-    console.error('Error adding special page:', error);
-    doc.text(`Ошибка загрузки: ${pageData.name}`, MARGIN_LEFT, MARGIN_TOP);
+  // Ensure font is set for this page
+  doc.setFont(fontName, 'normal');
+  doc.setFontSize(FONT_SIZE);
+  doc.setTextColor(0, 0, 0);
+
+  if (!pageData || !pageData.file) {
+    console.warn(`Special page missing: ${pageName}`);
+    doc.text(`[${pageName} не загружен]`, MARGIN_LEFT, MARGIN_TOP);
     addPageNumber(doc, pageNum);
+    return pageNum;
   }
 
-  return pageNum;
+  const fileType = (pageData.type || '').toLowerCase();
+  console.log(`Adding special page: ${pageName}, type: ${fileType}, file: ${pageData.name}`);
+
+  try {
+    if (fileType === '.pdf') {
+      // For PDF files, we add a placeholder page (full PDF embedding requires pdf-lib)
+      doc.setFont(fontName, 'bold');
+      doc.setFontSize(14);
+      doc.text(`[Содержимое из PDF: ${pageData.name}]`, MARGIN_LEFT, MARGIN_TOP);
+      doc.setFont(fontName, 'normal');
+      doc.setFontSize(11);
+      doc.text('(PDF файлы рекомендуется загружать в формате .docx для полной интеграции)', MARGIN_LEFT, MARGIN_TOP + LINE_HEIGHT * 2);
+      addPageNumber(doc, pageNum);
+      return pageNum;
+    } else if (fileType === '.docx' || fileType === '.doc') {
+      const { html, images } = await convertDocxToHtml(pageData.file);
+
+      console.log(`Converted ${pageName}: HTML length=${html?.length || 0}, images=${images?.length || 0}`);
+
+      if ((!html || html.trim() === '') && (!images || images.length === 0)) {
+        console.warn(`Empty content for ${pageName}: ${pageData.name}`);
+        doc.text(`[Файл ${pageData.name} не содержит контента]`, MARGIN_LEFT, MARGIN_TOP);
+        addPageNumber(doc, pageNum);
+        return pageNum;
+      }
+
+      // Use html2canvas to preserve original Word formatting
+      const result = await renderHtmlAsImage(doc, html, MARGIN_TOP, pageNum);
+
+      if (!result.hasContent) {
+        console.warn(`No rendered content for ${pageName}: ${pageData.name}`);
+        doc.text(`[Не удалось извлечь контент из ${pageData.name}]`, MARGIN_LEFT, MARGIN_TOP);
+      }
+
+      addPageNumber(doc, result.endPage);
+      return result.endPage;
+    } else {
+      // Unknown file type
+      console.warn(`Unknown file type for ${pageName}: ${fileType}`);
+      doc.text(`[Неподдерживаемый формат файла: ${pageData.name}]`, MARGIN_LEFT, MARGIN_TOP);
+      doc.text('Поддерживаемые форматы: .docx, .pdf', MARGIN_LEFT, MARGIN_TOP + LINE_HEIGHT);
+      addPageNumber(doc, pageNum);
+      return pageNum;
+    }
+  } catch (error) {
+    console.error(`Error adding special page ${pageName}:`, error);
+    doc.setFont(fontName, 'normal');
+    doc.setFontSize(FONT_SIZE);
+    doc.text(`Ошибка загрузки: ${pageData.name}`, MARGIN_LEFT, MARGIN_TOP);
+    doc.text(`Причина: ${error.message}`, MARGIN_LEFT, MARGIN_TOP + LINE_HEIGHT);
+    addPageNumber(doc, pageNum);
+    return pageNum;
+  }
 };
 
 /**
@@ -290,13 +745,13 @@ export const generatePDF = async (issue, articles, coverPage, descriptionPage, f
   try {
     // 1. Cover page
     onProgress({ step: ++currentStep, total: totalSteps, message: 'Добавление титульного листа...' });
-    currentPage = await addSpecialPage(doc, coverPage, currentPage);
+    currentPage = await addSpecialPage(doc, coverPage, currentPage, 'Титульный лист');
 
     // 2. Description page
     onProgress({ step: ++currentStep, total: totalSteps, message: 'Добавление описания журнала...' });
     doc.addPage();
     currentPage++;
-    currentPage = await addSpecialPage(doc, descriptionPage, currentPage);
+    currentPage = await addSpecialPage(doc, descriptionPage, currentPage, 'Описание и редакция');
 
     // 3. Articles
     for (let i = 0; i < articles.length; i++) {
@@ -340,11 +795,13 @@ export const generatePDF = async (issue, articles, coverPage, descriptionPage, f
 
       doc.setFont(fontName, 'normal');
 
-      // Article content
+      // Article content - render as image to preserve original Word formatting
       if (article.file) {
         try {
-          const { html } = await convertDocxToHtml(article.file);
-          const result = renderHtmlToPdf(doc, html, startY, currentPage);
+          const { html, images } = await convertDocxToHtml(article.file);
+          console.log(`Article "${article.title}": HTML=${html?.length || 0} chars, images=${images?.length || 0}`);
+          // Use html2canvas to preserve original formatting
+          const result = await renderHtmlAsImage(doc, html, startY, currentPage);
           currentPage = result.endPage;
           addPageNumber(doc, currentPage);
         } catch (error) {
@@ -370,7 +827,7 @@ export const generatePDF = async (issue, articles, coverPage, descriptionPage, f
     onProgress({ step: totalSteps, total: totalSteps, message: 'Добавление заключительной страницы...' });
     doc.addPage();
     currentPage++;
-    currentPage = await addSpecialPage(doc, finalPage, currentPage);
+    currentPage = await addSpecialPage(doc, finalPage, currentPage, 'Заключительная страница');
 
     // Generate blob
     const pdfBlob = doc.output('blob');
