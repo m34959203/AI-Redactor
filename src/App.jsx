@@ -14,7 +14,7 @@ import { useApp, useNotifications, useProcessing } from './context/AppContext';
 import { extractMetadataWithAI, checkSpelling, reviewArticle } from './services/aiApi';
 import { validatePageFile, validateArticleFile } from './utils/fileValidation';
 import { detectLanguage, sortArticlesByLanguage } from './utils/languageDetection';
-import { validatePdfRequirements, createIssue, generatePDF, downloadPDF } from './utils/pdfGenerator';
+import { validatePdfRequirements, createIssue, generatePDF, generatePDFSmart, downloadPDF } from './utils/pdfGenerator';
 import { convertDocxToText } from './utils/docxConverter';
 import { addToArchive, getPdfBlob, removeFromArchive } from './utils/archiveStorage';
 
@@ -200,7 +200,7 @@ const App = () => {
     try {
       const issue = createIssue(articles, coverPage, descriptionPage, finalPage);
 
-      const pdfBlob = await generatePDF(
+      const { blob: pdfBlob, method } = await generatePDFSmart(
         issue,
         articles,
         coverPage,
@@ -216,7 +216,10 @@ const App = () => {
 
       downloadPDF(pdfBlob, `${issue.name.replace(/\s+/g, '_')}.pdf`);
 
-      showSuccess(`PDF успешно сгенерирован! ${articles.length} статей в выпуске.`);
+      const methodInfo = method === 'server'
+        ? '(LibreOffice - точное сохранение форматирования)'
+        : '(локальная генерация)';
+      showSuccess(`PDF успешно сгенерирован ${methodInfo}! ${articles.length} статей в выпуске.`);
     } catch (error) {
       console.error('Error generating PDF:', error);
       showError('Ошибка при генерации PDF: ' + error.message);
