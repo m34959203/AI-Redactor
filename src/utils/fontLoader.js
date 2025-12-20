@@ -5,15 +5,15 @@
 
 // Font URLs from Google Fonts repository (PT Serif - Times-like, supports Cyrillic)
 const FONT_URLS = {
-  regular: 'https://raw.githubusercontent.com/google/fonts/main/ofl/ptserif/PTSerif-Regular.ttf',
-  bold: 'https://raw.githubusercontent.com/google/fonts/main/ofl/ptserif/PTSerif-Bold.ttf',
-  italic: 'https://raw.githubusercontent.com/google/fonts/main/ofl/ptserif/PTSerif-Italic.ttf',
+  regular: 'https://raw.githubusercontent.com/google/fonts/main/ofl/ptserif/PT_Serif-Web-Regular.ttf',
+  bold: 'https://raw.githubusercontent.com/google/fonts/main/ofl/ptserif/PT_Serif-Web-Bold.ttf',
+  italic: 'https://raw.githubusercontent.com/google/fonts/main/ofl/ptserif/PT_Serif-Web-Italic.ttf',
 };
 
 // Fallback to PT Sans if PT Serif not available
 const FALLBACK_URLS = {
-  regular: 'https://raw.githubusercontent.com/google/fonts/main/ofl/ptsans/PTSans-Regular.ttf',
-  bold: 'https://raw.githubusercontent.com/google/fonts/main/ofl/ptsans/PTSans-Bold.ttf',
+  regular: 'https://raw.githubusercontent.com/google/fonts/main/ofl/ptsans/PT_Sans-Web-Regular.ttf',
+  bold: 'https://raw.githubusercontent.com/google/fonts/main/ofl/ptsans/PT_Sans-Web-Bold.ttf',
 };
 
 // Cache for loaded fonts
