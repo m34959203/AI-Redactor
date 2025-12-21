@@ -57,10 +57,10 @@ export const convertDocxToPdf = async (file) => {
 /**
  * Generate journal PDF from multiple files
  * @param {Object} params - Journal parameters
- * @param {File} params.coverPage - Cover page file
- * @param {File} params.descriptionPage - Description page file
- * @param {File[]} params.articles - Array of article files
- * @param {File} params.finalPage - Final page file
+ * @param {Object} params.coverPage - Cover page data with file
+ * @param {Object} params.descriptionPage - Description page data with file
+ * @param {Array} params.articles - Array of article objects with file, title, author, section
+ * @param {Object} params.finalPage - Final page data with file
  * @param {Function} onProgress - Progress callback
  * @returns {Promise<Blob>} - Generated PDF blob
  */
@@ -77,12 +77,26 @@ export const generateJournalPdf = async ({ coverPage, descriptionPage, articles,
     formData.append('descriptionPage', descriptionPage.file);
   }
 
+  // Prepare articles metadata for Table of Contents
+  const articlesMetadata = [];
+
   if (articles && articles.length > 0) {
     for (const article of articles) {
       if (article.file) {
         formData.append('articles', article.file);
+
+        // Add metadata for TOC
+        articlesMetadata.push({
+          fileName: article.file.name,
+          title: article.title || article.file.name.replace(/\.[^/.]+$/, ''),
+          author: article.author || 'Автор не указан',
+          section: article.section || 'ТЕХНИЧЕСКИЕ НАУКИ'
+        });
       }
     }
+
+    // Send metadata as JSON
+    formData.append('articlesMetadata', JSON.stringify(articlesMetadata));
   }
 
   if (finalPage?.file) {
