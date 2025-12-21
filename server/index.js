@@ -148,7 +148,10 @@ async function convertDocxToPdf(inputPath, outputDir) {
 }
 
 /**
- * Add page numbers to a PDF using pdf-lib
+ * Add page numbers and journal footer to a PDF using pdf-lib
+ * Footer format alternates between odd and even pages:
+ * - Odd pages: "Вестник Жезказганского Университета имени О.А. Байконурова | page_number" (right-aligned)
+ * - Even pages: "page_number | Вестник Жезказганского Университета имени О.А. Байконурова" (left-aligned)
  * @param {Buffer} pdfBuffer - PDF buffer
  * @param {number} startPage - Start numbering from this page (1-indexed, skip cover)
  * @returns {Promise<Buffer>} - PDF buffer with page numbers
@@ -156,25 +159,66 @@ async function convertDocxToPdf(inputPath, outputDir) {
 async function addPageNumbers(pdfBuffer, startPage = 2) {
   try {
     const pdfDoc = await PDFDocument.load(pdfBuffer);
-    const font = await pdfDoc.embedFont(StandardFonts.TimesRoman);
+    pdfDoc.registerFontkit(fontkit);
     const pages = pdfDoc.getPages();
+
+    const journalTitle = 'Вестник Жезказганского Университета имени О.А. Байконурова';
+    const fontSize = 10;
+    const marginLeft = 70.87; // 25mm in points
+    const marginRight = 70.87; // 25mm in points
+
+    // Try to load Cyrillic font for footer
+    const fontBuffers = await loadCyrillicFont();
+    let font;
+
+    if (fontBuffers) {
+      try {
+        font = await pdfDoc.embedFont(fontBuffers.regular, { subset: false });
+        console.log('Cyrillic font loaded for footer');
+      } catch (err) {
+        console.warn('Failed to embed Cyrillic font for footer:', err.message);
+        font = await pdfDoc.embedFont(StandardFonts.TimesRoman);
+      }
+    } else {
+      font = await pdfDoc.embedFont(StandardFonts.TimesRoman);
+    }
 
     for (let i = startPage - 1; i < pages.length; i++) {
       const page = pages[i];
-      const { width, height } = page.getSize();
+      const { width } = page.getSize();
       const pageNum = i + 1;
+      const isOddPage = pageNum % 2 === 1;
 
-      // Add page number at bottom center
-      const text = String(pageNum);
-      const textWidth = font.widthOfTextAtSize(text, 10);
-
-      page.drawText(text, {
-        x: (width - textWidth) / 2,
-        y: 20,
-        size: 10,
-        font: font,
+      // Draw horizontal line above footer
+      page.drawLine({
+        start: { x: marginLeft, y: 35 },
+        end: { x: width - marginRight, y: 35 },
+        thickness: 0.5,
         color: rgb(0, 0, 0),
       });
+
+      if (isOddPage) {
+        // Odd pages: "Journal Title | page_number" (right-aligned)
+        const footerText = `${journalTitle} | ${pageNum}`;
+        const textWidth = font.widthOfTextAtSize(footerText, fontSize);
+        page.drawText(footerText, {
+          x: width - marginRight - textWidth,
+          y: 20,
+          size: fontSize,
+          font: font,
+          color: rgb(0, 0, 0),
+        });
+      } else {
+        // Even pages: "page_number | Journal Title" (left-aligned)
+        const footerText = `${pageNum} | ${journalTitle}`;
+        page.drawText(footerText, {
+          x: marginLeft,
+          y: 20,
+          size: fontSize,
+          font: font,
+          color: rgb(0, 0, 0),
+        });
+      }
     }
 
     return Buffer.from(await pdfDoc.save());
