@@ -641,11 +641,13 @@ setInterval(cleanupTempFiles, 30 * 60 * 1000);
 
 // ============ API ROUTES ============
 
+// Cache LibreOffice availability (checked once at startup)
+let libreOfficeAvailable = null;
+
 /**
- * Health check
+ * Health check (fast, non-blocking)
  */
-app.get('/api/health', async (req, res) => {
-  const libreOfficeAvailable = await checkLibreOffice();
+app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
     libreOffice: libreOfficeAvailable,
@@ -1019,23 +1021,25 @@ app.use((error, req, res, next) => {
 });
 
 // Start server
-app.listen(PORT, async () => {
+app.listen(PORT, () => {
   console.log(`\n🚀 AI-Redactor Server running on http://localhost:${PORT}`);
-
-  const libreOfficeAvailable = await checkLibreOffice();
-  if (libreOfficeAvailable) {
-    console.log('✅ LibreOffice is available');
-  } else {
-    console.log('⚠️  LibreOffice not found. Please install it:');
-    console.log('   Ubuntu/Debian: sudo apt install libreoffice');
-    console.log('   macOS: brew install --cask libreoffice');
-    console.log('   Windows: Download from https://www.libreoffice.org/');
-  }
-
   console.log('\nAPI Endpoints:');
   console.log('  GET  /api/health          - Health check');
   console.log('  POST /api/convert         - Convert single DOCX to PDF');
   console.log('  POST /api/convert-base64  - Convert DOCX to PDF (base64)');
   console.log('  POST /api/generate-journal - Generate journal from multiple files');
   console.log('');
+
+  // Check LibreOffice availability asynchronously after server starts
+  checkLibreOffice().then(available => {
+    libreOfficeAvailable = available;
+    if (available) {
+      console.log('✅ LibreOffice is available');
+    } else {
+      console.log('⚠️  LibreOffice not found. Please install it:');
+      console.log('   Ubuntu/Debian: sudo apt install libreoffice');
+      console.log('   macOS: brew install --cask libreoffice');
+      console.log('   Windows: Download from https://www.libreoffice.org/');
+    }
+  });
 });
