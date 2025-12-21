@@ -235,25 +235,31 @@ ${content.substring(0, 2500)}
 export const checkSpelling = async (content, fileName) => {
   const prompt = `Проверь орфографию в научном тексте.
 
-ПРАВИЛА ПРОВЕРКИ:
-1. Поддерживаемые языки: русский, английский, казахский
-2. Игнорируй:
-   - Специальные термины и аббревиатуры (DNA, РНК, ЖИК)
+ВАЖНЫЕ ПРАВИЛА:
+1. Возвращай ТОЛЬКО реальные орфографические ОШИБКИ, где слово написано НЕПРАВИЛЬНО
+2. word и suggestion должны быть РАЗНЫМИ словами!
+3. Если слово написано правильно - НЕ добавляй его в список ошибок
+4. Игнорируй:
+   - Специальные термины и аббревиатуры (DNA, РНК, ЖИК, IT)
    - Имена собственные и названия
-   - Формулы и числа
-3. Найди до 15 самых явных орфографических ошибок
-4. Для каждой ошибки укажи контекст (3-5 слов вокруг)
+   - Формулы, числа и символы
+   - Слова на казахском языке если они написаны правильно
+5. Найди до 10 самых явных орфографических ошибок
 
-ПРИМЕР ОТВЕТА:
+ПРИМЕР ПРАВИЛЬНОГО ОТВЕТА:
 {
   "errors": [
     {"word": "эксперемент", "suggestion": "эксперимент", "context": "...провести эксперемент в лаборатории..."},
-    {"word": "ресурс", "suggestion": "ресурсы", "context": "...природные ресурс истощаются..."}
+    {"word": "обьект", "suggestion": "объект", "context": "...изучаемый обьект исследования..."}
   ],
   "totalErrors": 2
 }
 
-Если ошибок нет: {"errors": [], "totalErrors": 0}
+ПРИМЕР КОГДА ОШИБОК НЕТ:
+{"errors": [], "totalErrors": 0}
+
+НЕ ДЕЛАЙ ТАК (word = suggestion - это НЕ ошибка):
+{"word": "многогранного", "suggestion": "многогранного"} - НЕПРАВИЛЬНО!
 
 ТЕКСТ ДЛЯ ПРОВЕРКИ:
 ${content.substring(0, 4000)}
@@ -266,12 +272,21 @@ ${content.substring(0, 4000)}
     const response = await makeAIRequest(prompt, 2000);
     const result = safeJsonParse(response, fallback);
 
+    // Filter out false positives where word equals suggestion
+    const validErrors = Array.isArray(result.errors)
+      ? result.errors.filter(err => {
+          // Skip if word and suggestion are the same
+          if (!err.word || !err.suggestion) return false;
+          const word = err.word.toLowerCase().trim();
+          const suggestion = err.suggestion.toLowerCase().trim();
+          return word !== suggestion;
+        })
+      : [];
+
     return {
       fileName,
-      errors: Array.isArray(result.errors) ? result.errors : [],
-      totalErrors: typeof result.totalErrors === 'number'
-        ? result.totalErrors
-        : (result.errors?.length || 0)
+      errors: validErrors,
+      totalErrors: validErrors.length
     };
   } catch (error) {
     console.error("Spell check error:", error);

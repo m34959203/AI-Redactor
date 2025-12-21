@@ -47,8 +47,9 @@ const storage = multer.diskStorage({
     cb(null, sessionDir);
   },
   filename: (req, file, cb) => {
-    // Preserve original filename with unique prefix
-    const uniqueName = `${Date.now()}-${file.originalname}`;
+    // Preserve original filename with unique prefix (decode UTF-8)
+    const decodedName = decodeFilename(file.originalname);
+    const uniqueName = `${Date.now()}-${decodedName}`;
     cb(null, uniqueName);
   }
 });
@@ -62,10 +63,11 @@ const upload = multer({
       'application/msword',
       'application/pdf'
     ];
+    const decodedName = decodeFilename(file.originalname);
     if (allowedTypes.includes(file.mimetype) ||
-        file.originalname.endsWith('.docx') ||
-        file.originalname.endsWith('.doc') ||
-        file.originalname.endsWith('.pdf')) {
+        decodedName.endsWith('.docx') ||
+        decodedName.endsWith('.doc') ||
+        decodedName.endsWith('.pdf')) {
       cb(null, true);
     } else {
       cb(new Error('Only .docx, .doc and .pdf files are allowed'));
@@ -78,6 +80,23 @@ app.use((req, res, next) => {
   req.sessionId = req.headers['x-session-id'] || uuidv4();
   next();
 });
+
+/**
+ * Decode filename from latin1 to UTF-8
+ * Multer interprets filenames as latin1 by default, but browsers send UTF-8
+ * This causes Cyrillic filenames to be corrupted
+ * @param {string} filename - Original filename from multer
+ * @returns {string} - Properly decoded UTF-8 filename
+ */
+function decodeFilename(filename) {
+  if (!filename) return filename;
+  try {
+    // Convert latin1 string back to bytes, then decode as UTF-8
+    return Buffer.from(filename, 'latin1').toString('utf8');
+  } catch {
+    return filename;
+  }
+}
 
 /**
  * Check if LibreOffice is available
@@ -425,19 +444,14 @@ async function generateTableOfContentsPdf(articles, tocStartPage) {
 }
 
 /**
- * Generate a section header page
+ * Add section header to the first page of an article PDF
+ * @param {Buffer} pdfBuffer - Original PDF buffer
  * @param {string} sectionName - Section name (e.g., "ТЕХНИЧЕСКИЕ НАУКИ")
- * @param {number} pageNum - Page number for this page
- * @returns {Promise<Buffer>} - PDF buffer with section header
+ * @returns {Promise<Buffer>} - Modified PDF buffer with section header
  */
-async function generateSectionHeaderPdf(sectionName, pageNum) {
-  const pdfDoc = await PDFDocument.create();
+async function addSectionHeaderToArticle(pdfBuffer, sectionName) {
+  const pdfDoc = await PDFDocument.load(pdfBuffer);
   pdfDoc.registerFontkit(fontkit);
-
-  // Page dimensions (A4)
-  const pageWidth = 595.28;
-  const pageHeight = 841.89;
-  const marginTop = 85.04;
 
   // Load Cyrillic font
   const fontBuffers = await loadCyrillicFont();
@@ -453,46 +467,37 @@ async function generateSectionHeaderPdf(sectionName, pageNum) {
     fontBold = await pdfDoc.embedFont(StandardFonts.TimesRomanBold);
   }
 
-  const page = pdfDoc.addPage([pageWidth, pageHeight]);
+  const pages = pdfDoc.getPages();
+  if (pages.length === 0) return pdfBuffer;
 
-  // Section header - centered, bold, large font
-  const titleSize = 18;
+  const firstPage = pages[0];
+  const { width, height } = firstPage.getSize();
+
+  // Section header - centered at top, bold font
+  const titleSize = 14;
+  const marginTop = 50; // Position from top
+
   try {
     const titleWidth = fontBold.widthOfTextAtSize(sectionName, titleSize);
-    page.drawText(sectionName, {
-      x: (pageWidth - titleWidth) / 2,
-      y: pageHeight - marginTop - 50,
+    firstPage.drawText(sectionName, {
+      x: (width - titleWidth) / 2,
+      y: height - marginTop,
       size: titleSize,
       font: fontBold,
       color: rgb(0, 0.2, 0.4), // Dark blue
     });
 
     // Add underline
-    const underlineY = pageHeight - marginTop - 55;
-    page.drawLine({
-      start: { x: (pageWidth - titleWidth) / 2, y: underlineY },
-      end: { x: (pageWidth + titleWidth) / 2, y: underlineY },
-      thickness: 1,
+    const underlineY = height - marginTop - 3;
+    firstPage.drawLine({
+      start: { x: (width - titleWidth) / 2, y: underlineY },
+      end: { x: (width + titleWidth) / 2, y: underlineY },
+      thickness: 0.5,
       color: rgb(0, 0.2, 0.4),
     });
   } catch (err) {
-    console.warn('Failed to draw section header:', err.message);
+    console.warn('Failed to add section header to article:', err.message);
   }
-
-  // Add page number at bottom
-  const font = fontBuffers ?
-    await pdfDoc.embedFont(fontBuffers.regular, { subset: false }).catch(() => pdfDoc.embedFont(StandardFonts.TimesRoman)) :
-    await pdfDoc.embedFont(StandardFonts.TimesRoman);
-
-  const pageNumText = String(pageNum);
-  const pageNumWidth = font.widthOfTextAtSize(pageNumText, 10);
-  page.drawText(pageNumText, {
-    x: (pageWidth - pageNumWidth) / 2,
-    y: 20,
-    size: 10,
-    font: font,
-    color: rgb(0, 0, 0),
-  });
 
   return Buffer.from(await pdfDoc.save());
 }
@@ -619,13 +624,14 @@ app.post('/api/convert', upload.single('file'), async (req, res) => {
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
-    console.log(`Processing file: ${req.file.originalname}`);
+    const decodedName = decodeFilename(req.file.originalname);
+    console.log(`Processing file: ${decodedName}`);
 
     // If already PDF, just return it
-    if (req.file.originalname.endsWith('.pdf')) {
+    if (decodedName.endsWith('.pdf')) {
       const pdfBuffer = await fs.readFile(req.file.path);
       res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `attachment; filename="${req.file.originalname}"`);
+      res.setHeader('Content-Disposition', `attachment; filename="${decodedName}"`);
       return res.send(pdfBuffer);
     }
 
@@ -638,7 +644,7 @@ app.post('/api/convert', upload.single('file'), async (req, res) => {
     await fs.unlink(pdfPath).catch(() => {});
 
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="${path.basename(req.file.originalname, '.docx')}.pdf"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${path.basename(decodedName, '.docx')}.pdf"`);
     res.send(pdfBuffer);
 
   } catch (error) {
@@ -669,10 +675,10 @@ app.post('/api/generate-journal', upload.fields([
   try {
     console.log('Generating journal PDF...');
     console.log('Files received:', {
-      coverPage: req.files.coverPage?.[0]?.originalname,
-      descriptionPage: req.files.descriptionPage?.[0]?.originalname,
-      articles: req.files.articles?.map(f => f.originalname),
-      finalPage: req.files.finalPage?.[0]?.originalname
+      coverPage: req.files.coverPage?.[0] ? decodeFilename(req.files.coverPage[0].originalname) : null,
+      descriptionPage: req.files.descriptionPage?.[0] ? decodeFilename(req.files.descriptionPage[0].originalname) : null,
+      articles: req.files.articles?.map(f => decodeFilename(f.originalname)),
+      finalPage: req.files.finalPage?.[0] ? decodeFilename(req.files.finalPage[0].originalname) : null
     });
 
     // Parse article metadata for TOC
@@ -693,8 +699,9 @@ app.post('/api/generate-journal', upload.fields([
     // 1. Process cover page
     if (req.files.coverPage?.[0]) {
       const file = req.files.coverPage[0];
-      console.log('Processing cover:', file.originalname);
-      if (file.originalname.endsWith('.pdf')) {
+      const decodedName = decodeFilename(file.originalname);
+      console.log('Processing cover:', decodedName);
+      if (decodedName.endsWith('.pdf')) {
         pdfPaths.push({ path: file.path, type: 'cover' });
       } else {
         const pdfPath = await convertDocxToPdf(file.path, sessionDir);
@@ -710,8 +717,9 @@ app.post('/api/generate-journal', upload.fields([
     // 2. Process description page
     if (req.files.descriptionPage?.[0]) {
       const file = req.files.descriptionPage[0];
-      console.log('Processing description:', file.originalname);
-      if (file.originalname.endsWith('.pdf')) {
+      const decodedName = decodeFilename(file.originalname);
+      console.log('Processing description:', decodedName);
+      if (decodedName.endsWith('.pdf')) {
         pdfPaths.push({ path: file.path, type: 'description' });
       } else {
         const pdfPath = await convertDocxToPdf(file.path, sessionDir);
@@ -732,10 +740,11 @@ app.post('/api/generate-journal', upload.fields([
 
     if (req.files.articles) {
       for (const file of req.files.articles) {
-        console.log(`Processing article: ${file.originalname}`);
+        const decodedName = decodeFilename(file.originalname);
+        console.log(`Processing article: ${decodedName}`);
 
         let pdfPath;
-        if (file.originalname.endsWith('.pdf')) {
+        if (decodedName.endsWith('.pdf')) {
           pdfPath = file.path;
         } else {
           pdfPath = await convertDocxToPdf(file.path, sessionDir);
@@ -746,9 +755,9 @@ app.post('/api/generate-journal', upload.fields([
         const articleDoc = await PDFDocument.load(articleBuffer);
         const articlePageCount = articleDoc.getPageCount();
 
-        // Find metadata for this article
-        const meta = articlesMetadata.find(m => m.fileName === file.originalname) || {
-          title: file.originalname.replace(/\.[^/.]+$/, ''),
+        // Find metadata for this article (match using decoded filename)
+        const meta = articlesMetadata.find(m => m.fileName === decodedName) || {
+          title: decodedName.replace(/\.[^/.]+$/, ''),
           author: 'Автор не указан',
           section: SECTION_ORDER[0]
         };
@@ -779,37 +788,37 @@ app.post('/api/generate-journal', upload.fields([
         });
     }
 
-    // 5. Build ordered list with section headers and calculate page numbers
-    const orderedPdfs = []; // Array of {type: 'section'|'article', path, pageCount, data}
+    // 5. Build ordered list and add section headers to first article of each section
+    const orderedPdfs = []; // Array of {path, pageCount}
     const articlesWithPages = [];
 
     for (const sectionName of SECTION_ORDER) {
       const sectionArticles = articlesBySection[sectionName];
       if (!sectionArticles || sectionArticles.length === 0) continue;
 
-      // Add section header page
-      console.log(`Generating section header: ${sectionName}`);
-      const sectionHeaderBuffer = await generateSectionHeaderPdf(sectionName, currentPage);
-      const sectionHeaderPath = path.join(sessionDir, `section-${Date.now()}-${SECTION_ORDER.indexOf(sectionName)}.pdf`);
-      await fs.writeFile(sectionHeaderPath, sectionHeaderBuffer);
+      // Process articles in this section
+      for (let i = 0; i < sectionArticles.length; i++) {
+        const article = sectionArticles[i];
+        let articlePdfPath = article.pdfPath;
 
-      orderedPdfs.push({
-        type: 'section',
-        path: sectionHeaderPath,
-        pageCount: 1
-      });
-      currentPage += 1;
+        // Add section header to FIRST article of each section
+        if (i === 0) {
+          console.log(`Adding section header "${sectionName}" to first article`);
+          const articleBuffer = await fs.readFile(article.pdfPath);
+          const modifiedBuffer = await addSectionHeaderToArticle(articleBuffer, sectionName);
 
-      // Add articles in this section
-      for (const article of sectionArticles) {
+          // Save modified PDF
+          articlePdfPath = path.join(sessionDir, `article-with-header-${Date.now()}-${SECTION_ORDER.indexOf(sectionName)}.pdf`);
+          await fs.writeFile(articlePdfPath, modifiedBuffer);
+        }
+
         articlesWithPages.push({
           ...article,
           pageNumber: currentPage
         });
 
         orderedPdfs.push({
-          type: 'article',
-          path: article.pdfPath,
+          path: articlePdfPath,
           pageCount: article.pageCount
         });
         currentPage += article.pageCount;
@@ -837,8 +846,9 @@ app.post('/api/generate-journal', upload.fields([
     let finalPdfPath = null;
     if (req.files.finalPage?.[0]) {
       const file = req.files.finalPage[0];
-      console.log('Processing final page:', file.originalname);
-      if (file.originalname.endsWith('.pdf')) {
+      const decodedName = decodeFilename(file.originalname);
+      console.log('Processing final page:', decodedName);
+      if (decodedName.endsWith('.pdf')) {
         finalPdfPath = file.path;
       } else {
         finalPdfPath = await convertDocxToPdf(file.path, sessionDir);
@@ -846,7 +856,7 @@ app.post('/api/generate-journal', upload.fields([
     }
 
     // 8. Merge all PDFs in correct order:
-    // Cover -> Description -> [Section Header -> Articles]... -> TOC -> Final
+    // Cover -> Description -> Articles (with section headers) -> TOC -> Final
     const allPdfPaths = [];
 
     // Cover
@@ -857,7 +867,7 @@ app.post('/api/generate-journal', upload.fields([
     const descPdf = pdfPaths.find(p => p.type === 'description');
     if (descPdf) allPdfPaths.push(descPdf.path);
 
-    // Section headers and Articles (in order)
+    // Articles (first article of each section has section header embedded)
     for (const pdf of orderedPdfs) {
       allPdfPaths.push(pdf.path);
     }
@@ -868,7 +878,7 @@ app.post('/api/generate-journal', upload.fields([
     // Final
     if (finalPdfPath) allPdfPaths.push(finalPdfPath);
 
-    console.log('Merging PDFs:', allPdfPaths.length, 'files in order: Cover, Description, [Sections+Articles], TOC, Final');
+    console.log('Merging PDFs:', allPdfPaths.length, 'files in order: Cover, Description, Articles, TOC, Final');
 
     // Merge all PDFs
     const outputPath = path.join(sessionDir, `journal-${Date.now()}.pdf`);
