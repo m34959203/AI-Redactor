@@ -1,7 +1,7 @@
 /**
  * AI-Redactor Backend Server
  * Provides DOCX to PDF conversion using LibreOffice
- * Adds page numbering using pdf-lib
+ * Adds page numbering and Table of Contents using pdf-lib
  */
 
 import express from 'express';
@@ -14,6 +14,14 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { v4 as uuidv4 } from 'uuid';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
+import fontkit from '@pdf-lib/fontkit';
+
+// Section order for Table of Contents
+const SECTION_ORDER = [
+  'ТЕХНИЧЕСКИЕ НАУКИ',
+  'ПЕДАГОГИЧЕСКИЕ НАУКИ',
+  'ЕСТЕСТВЕННЫЕ И ЭКОНОМИЧЕСКИЕ НАУКИ'
+];
 
 const execAsync = promisify(exec);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -155,6 +163,244 @@ async function addPageNumbers(pdfBuffer, startPage = 2) {
     console.error('Error adding page numbers:', error);
     return pdfBuffer; // Return original if fails
   }
+}
+
+/**
+ * Load Cyrillic font for PDF generation
+ * Tries system fonts first, then falls back to embedded font
+ * @returns {Promise<Buffer|null>} - Font buffer or null if not found
+ */
+async function loadCyrillicFont() {
+  // Common paths for DejaVu fonts on Linux
+  const fontPaths = [
+    '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+    '/usr/share/fonts/TTF/DejaVuSans.ttf',
+    '/usr/share/fonts/dejavu/DejaVuSans.ttf',
+    '/usr/share/fonts/truetype/freefont/FreeSans.ttf',
+    '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
+    // macOS paths
+    '/System/Library/Fonts/Helvetica.ttc',
+    '/Library/Fonts/Arial.ttf'
+  ];
+
+  for (const fontPath of fontPaths) {
+    try {
+      const fontBuffer = await fs.readFile(fontPath);
+      console.log(`Loaded Cyrillic font: ${fontPath}`);
+      return fontBuffer;
+    } catch {
+      // Try next font
+    }
+  }
+
+  console.warn('No Cyrillic font found, Table of Contents will use Latin fallback');
+  return null;
+}
+
+/**
+ * Generate Table of Contents PDF page
+ * @param {Array} articles - Array of {title, author, section, pageNumber}
+ * @param {number} tocStartPage - Page number where TOC starts
+ * @returns {Promise<Buffer>} - PDF buffer with TOC
+ */
+async function generateTableOfContentsPdf(articles, tocStartPage) {
+  const pdfDoc = await PDFDocument.create();
+  pdfDoc.registerFontkit(fontkit);
+
+  // Page dimensions (A4)
+  const pageWidth = 595.28; // 210mm in points
+  const pageHeight = 841.89; // 297mm in points
+  const marginLeft = 70.87; // 25mm
+  const marginRight = 70.87; // 25mm
+  const marginTop = 85.04; // 30mm
+  const marginBottom = 85.04; // 30mm
+  const contentWidth = pageWidth - marginLeft - marginRight;
+  const lineHeight = 17; // ~6mm
+
+  // Try to load Cyrillic font
+  const fontBuffer = await loadCyrillicFont();
+  let font, fontBold;
+
+  if (fontBuffer) {
+    try {
+      font = await pdfDoc.embedFont(fontBuffer);
+      fontBold = font; // DejaVu Sans doesn't have separate bold, use same
+    } catch (err) {
+      console.warn('Failed to embed Cyrillic font:', err.message);
+      font = await pdfDoc.embedFont(StandardFonts.TimesRoman);
+      fontBold = await pdfDoc.embedFont(StandardFonts.TimesRomanBold);
+    }
+  } else {
+    font = await pdfDoc.embedFont(StandardFonts.TimesRoman);
+    fontBold = await pdfDoc.embedFont(StandardFonts.TimesRomanBold);
+  }
+
+  let page = pdfDoc.addPage([pageWidth, pageHeight]);
+  let currentY = pageHeight - marginTop;
+  let currentPageNum = tocStartPage;
+
+  // Title "СОДЕРЖАНИЕ"
+  const titleText = 'СОДЕРЖАНИЕ';
+  const titleSize = 16;
+  try {
+    const titleWidth = fontBold.widthOfTextAtSize(titleText, titleSize);
+    page.drawText(titleText, {
+      x: (pageWidth - titleWidth) / 2,
+      y: currentY,
+      size: titleSize,
+      font: fontBold,
+      color: rgb(0, 0, 0),
+    });
+  } catch {
+    // Fallback for non-Cyrillic font
+    const fallbackTitle = 'TABLE OF CONTENTS';
+    const titleWidth = fontBold.widthOfTextAtSize(fallbackTitle, titleSize);
+    page.drawText(fallbackTitle, {
+      x: (pageWidth - titleWidth) / 2,
+      y: currentY,
+      size: titleSize,
+      font: fontBold,
+      color: rgb(0, 0, 0),
+    });
+  }
+  currentY -= lineHeight * 2.5;
+
+  // Group articles by section
+  const entriesBySection = {};
+  articles.forEach(article => {
+    const section = article.section || SECTION_ORDER[0];
+    if (!entriesBySection[section]) {
+      entriesBySection[section] = [];
+    }
+    entriesBySection[section].push(article);
+  });
+
+  let articleNumber = 1;
+
+  // Iterate through sections in order
+  for (const sectionName of SECTION_ORDER) {
+    const sectionEntries = entriesBySection[sectionName];
+    if (!sectionEntries || sectionEntries.length === 0) continue;
+
+    // Check if we need a new page for section header
+    if (currentY - lineHeight * 4 < marginBottom) {
+      // Add page number to current page
+      const pageNumText = String(currentPageNum);
+      const pageNumWidth = font.widthOfTextAtSize(pageNumText, 10);
+      page.drawText(pageNumText, {
+        x: (pageWidth - pageNumWidth) / 2,
+        y: 20,
+        size: 10,
+        font: font,
+        color: rgb(0, 0, 0),
+      });
+
+      page = pdfDoc.addPage([pageWidth, pageHeight]);
+      currentPageNum++;
+      currentY = pageHeight - marginTop;
+    }
+
+    // Section header (dark blue, centered)
+    try {
+      const sectionWidth = fontBold.widthOfTextAtSize(sectionName, 12);
+      page.drawText(sectionName, {
+        x: (pageWidth - sectionWidth) / 2,
+        y: currentY,
+        size: 12,
+        font: fontBold,
+        color: rgb(0, 0.2, 0.4), // Dark blue
+      });
+    } catch {
+      // Section name might fail with non-Cyrillic font, skip
+    }
+    currentY -= lineHeight * 2;
+
+    // Articles in section
+    for (const entry of sectionEntries) {
+      if (currentY - lineHeight * 3 < marginBottom) {
+        // Add page number to current page
+        const pageNumText = String(currentPageNum);
+        const pageNumWidth = font.widthOfTextAtSize(pageNumText, 10);
+        page.drawText(pageNumText, {
+          x: (pageWidth - pageNumWidth) / 2,
+          y: 20,
+          size: 10,
+          font: font,
+          color: rgb(0, 0, 0),
+        });
+
+        page = pdfDoc.addPage([pageWidth, pageHeight]);
+        currentPageNum++;
+        currentY = pageHeight - marginTop;
+      }
+
+      // Article number and title
+      const titleText = `${articleNumber}. ${entry.title || 'Без названия'}`;
+      try {
+        // Truncate title if too long
+        let displayTitle = titleText;
+        const maxTitleWidth = contentWidth - 30;
+        while (font.widthOfTextAtSize(displayTitle, 11) > maxTitleWidth && displayTitle.length > 20) {
+          displayTitle = displayTitle.slice(0, -4) + '...';
+        }
+
+        page.drawText(displayTitle, {
+          x: marginLeft,
+          y: currentY,
+          size: 11,
+          font: font,
+          color: rgb(0, 0, 0),
+        });
+      } catch {
+        // Skip if text rendering fails
+      }
+      currentY -= lineHeight;
+
+      // Author (gray, indented) and page number
+      const authorText = `    ${entry.author || 'Автор не указан'}`;
+      try {
+        page.drawText(authorText, {
+          x: marginLeft,
+          y: currentY,
+          size: 11,
+          font: font,
+          color: rgb(0.4, 0.4, 0.4),
+        });
+
+        // Page number on the right
+        const pageText = String(entry.pageNumber || '?');
+        const pageTextWidth = font.widthOfTextAtSize(pageText, 11);
+        page.drawText(pageText, {
+          x: pageWidth - marginRight - pageTextWidth,
+          y: currentY,
+          size: 11,
+          font: font,
+          color: rgb(0, 0, 0),
+        });
+      } catch {
+        // Skip if text rendering fails
+      }
+
+      currentY -= lineHeight * 1.5;
+      articleNumber++;
+    }
+
+    // Add space after section
+    currentY -= lineHeight;
+  }
+
+  // Add page number to last page
+  const pageNumText = String(currentPageNum);
+  const pageNumWidth = font.widthOfTextAtSize(pageNumText, 10);
+  page.drawText(pageNumText, {
+    x: (pageWidth - pageNumWidth) / 2,
+    y: 20,
+    size: 10,
+    font: font,
+    color: rgb(0, 0, 0),
+  });
+
+  return Buffer.from(await pdfDoc.save());
 }
 
 /**
@@ -315,6 +561,7 @@ app.post('/api/convert', upload.single('file'), async (req, res) => {
  *   - descriptionPage: description DOCX
  *   - articles[]: array of article DOCX files
  *   - finalPage: final page DOCX
+ *   - articlesMetadata: JSON string with article metadata for TOC
  */
 app.post('/api/generate-journal', upload.fields([
   { name: 'coverPage', maxCount: 1 },
@@ -334,47 +581,177 @@ app.post('/api/generate-journal', upload.fields([
       finalPage: req.files.finalPage?.[0]?.originalname
     });
 
-    // Process files in order
-    const filesToProcess = [];
+    // Parse article metadata for TOC
+    let articlesMetadata = [];
+    try {
+      if (req.body.articlesMetadata) {
+        articlesMetadata = JSON.parse(req.body.articlesMetadata);
+        console.log('Articles metadata received:', articlesMetadata.length, 'articles');
+      }
+    } catch (e) {
+      console.warn('Failed to parse articles metadata:', e.message);
+    }
 
+    // Track page counts for each section
+    let currentPage = 1; // Cover page
+    const pdfPageCounts = {};
+
+    // 1. Process cover page
     if (req.files.coverPage?.[0]) {
-      filesToProcess.push({ file: req.files.coverPage[0], name: 'cover' });
-    }
-
-    if (req.files.descriptionPage?.[0]) {
-      filesToProcess.push({ file: req.files.descriptionPage[0], name: 'description' });
-    }
-
-    if (req.files.articles) {
-      req.files.articles.forEach((file, index) => {
-        filesToProcess.push({ file, name: `article-${index}` });
-      });
-    }
-
-    if (req.files.finalPage?.[0]) {
-      filesToProcess.push({ file: req.files.finalPage[0], name: 'final' });
-    }
-
-    // Convert each file to PDF
-    for (const { file, name } of filesToProcess) {
-      console.log(`Processing ${name}: ${file.originalname}`);
-
+      const file = req.files.coverPage[0];
+      console.log('Processing cover:', file.originalname);
       if (file.originalname.endsWith('.pdf')) {
-        pdfPaths.push(file.path);
+        pdfPaths.push({ path: file.path, type: 'cover' });
       } else {
         const pdfPath = await convertDocxToPdf(file.path, sessionDir);
-        pdfPaths.push(pdfPath);
+        pdfPaths.push({ path: pdfPath, type: 'cover' });
+      }
+      // Count pages in cover
+      const coverBuffer = await fs.readFile(pdfPaths[pdfPaths.length - 1].path);
+      const coverDoc = await PDFDocument.load(coverBuffer);
+      pdfPageCounts.cover = coverDoc.getPageCount();
+      currentPage += pdfPageCounts.cover;
+    }
+
+    // 2. Process description page
+    if (req.files.descriptionPage?.[0]) {
+      const file = req.files.descriptionPage[0];
+      console.log('Processing description:', file.originalname);
+      if (file.originalname.endsWith('.pdf')) {
+        pdfPaths.push({ path: file.path, type: 'description' });
+      } else {
+        const pdfPath = await convertDocxToPdf(file.path, sessionDir);
+        pdfPaths.push({ path: pdfPath, type: 'description' });
+      }
+      // Count pages in description
+      const descBuffer = await fs.readFile(pdfPaths[pdfPaths.length - 1].path);
+      const descDoc = await PDFDocument.load(descBuffer);
+      pdfPageCounts.description = descDoc.getPageCount();
+      currentPage += pdfPageCounts.description;
+    }
+
+    // 3. Generate Table of Contents (estimate page numbers first)
+    const tocStartPage = currentPage;
+    let tocPagesEstimate = 1;
+    if (articlesMetadata.length > 15) {
+      tocPagesEstimate = Math.ceil(articlesMetadata.length / 15);
+    }
+    currentPage += tocPagesEstimate;
+
+    // 4. Process articles and calculate their page numbers
+    const articlePdfPaths = [];
+    const articlesWithPages = [];
+
+    if (req.files.articles) {
+      // Sort articles according to metadata order
+      const sortedArticles = [...req.files.articles];
+      if (articlesMetadata.length > 0) {
+        sortedArticles.sort((a, b) => {
+          const indexA = articlesMetadata.findIndex(m => m.fileName === a.originalname);
+          const indexB = articlesMetadata.findIndex(m => m.fileName === b.originalname);
+          return indexA - indexB;
+        });
+      }
+
+      for (const file of sortedArticles) {
+        console.log(`Processing article: ${file.originalname}`);
+
+        let pdfPath;
+        if (file.originalname.endsWith('.pdf')) {
+          pdfPath = file.path;
+        } else {
+          pdfPath = await convertDocxToPdf(file.path, sessionDir);
+        }
+
+        // Count pages in this article
+        const articleBuffer = await fs.readFile(pdfPath);
+        const articleDoc = await PDFDocument.load(articleBuffer);
+        const articlePageCount = articleDoc.getPageCount();
+
+        // Find metadata for this article
+        const meta = articlesMetadata.find(m => m.fileName === file.originalname) || {
+          title: file.originalname.replace(/\.[^/.]+$/, ''),
+          author: 'Автор не указан',
+          section: SECTION_ORDER[0]
+        };
+
+        articlesWithPages.push({
+          ...meta,
+          pageNumber: currentPage,
+          pageCount: articlePageCount
+        });
+
+        articlePdfPaths.push(pdfPath);
+        currentPage += articlePageCount;
       }
     }
 
+    // 5. Generate TOC with actual page numbers
+    let tocPdfPath = null;
+    if (articlesWithPages.length > 0) {
+      console.log('Generating Table of Contents...');
+      const tocBuffer = await generateTableOfContentsPdf(articlesWithPages, tocStartPage);
+      tocPdfPath = path.join(sessionDir, `toc-${Date.now()}.pdf`);
+      await fs.writeFile(tocPdfPath, tocBuffer);
+
+      // Recalculate if TOC pages changed
+      const tocDoc = await PDFDocument.load(tocBuffer);
+      const actualTocPages = tocDoc.getPageCount();
+      if (actualTocPages !== tocPagesEstimate) {
+        console.log(`TOC pages: estimated ${tocPagesEstimate}, actual ${actualTocPages}`);
+        // Adjust article page numbers
+        const pageDiff = actualTocPages - tocPagesEstimate;
+        articlesWithPages.forEach(article => {
+          article.pageNumber += pageDiff;
+        });
+        // Regenerate TOC with corrected page numbers
+        const correctedTocBuffer = await generateTableOfContentsPdf(articlesWithPages, tocStartPage);
+        await fs.writeFile(tocPdfPath, correctedTocBuffer);
+      }
+    }
+
+    // 6. Process final page
+    let finalPdfPath = null;
+    if (req.files.finalPage?.[0]) {
+      const file = req.files.finalPage[0];
+      console.log('Processing final page:', file.originalname);
+      if (file.originalname.endsWith('.pdf')) {
+        finalPdfPath = file.path;
+      } else {
+        finalPdfPath = await convertDocxToPdf(file.path, sessionDir);
+      }
+    }
+
+    // 7. Merge all PDFs in correct order
+    const allPdfPaths = [];
+
+    // Cover
+    const coverPdf = pdfPaths.find(p => p.type === 'cover');
+    if (coverPdf) allPdfPaths.push(coverPdf.path);
+
+    // Description
+    const descPdf = pdfPaths.find(p => p.type === 'description');
+    if (descPdf) allPdfPaths.push(descPdf.path);
+
+    // TOC
+    if (tocPdfPath) allPdfPaths.push(tocPdfPath);
+
+    // Articles
+    allPdfPaths.push(...articlePdfPaths);
+
+    // Final
+    if (finalPdfPath) allPdfPaths.push(finalPdfPath);
+
+    console.log('Merging PDFs:', allPdfPaths.length, 'files');
+
     // Merge all PDFs
     const outputPath = path.join(sessionDir, `journal-${Date.now()}.pdf`);
-    await mergePdfs(pdfPaths, outputPath);
+    await mergePdfs(allPdfPaths, outputPath);
 
     const pdfBuffer = await fs.readFile(outputPath);
 
     // Clean up
-    for (const pdfPath of pdfPaths) {
+    for (const pdfPath of allPdfPaths) {
       await fs.unlink(pdfPath).catch(() => {});
     }
     await fs.unlink(outputPath).catch(() => {});
