@@ -223,8 +223,10 @@ async function generateTableOfContentsPdf(articles, tocStartPage) {
 
   if (fontBuffer) {
     try {
-      font = await pdfDoc.embedFont(fontBuffer);
+      // Use subset: false to include all Cyrillic characters
+      font = await pdfDoc.embedFont(fontBuffer, { subset: false });
       fontBold = font; // DejaVu Sans doesn't have separate bold, use same
+      console.log('Cyrillic font embedded successfully');
     } catch (err) {
       console.warn('Failed to embed Cyrillic font:', err.message);
       font = await pdfDoc.embedFont(StandardFonts.TimesRoman);
@@ -593,7 +595,7 @@ app.post('/api/generate-journal', upload.fields([
     }
 
     // Track page counts for each section
-    let currentPage = 1; // Cover page
+    let currentPage = 1; // Start from page 1
     const pdfPageCounts = {};
 
     // 1. Process cover page
@@ -630,17 +632,10 @@ app.post('/api/generate-journal', upload.fields([
       currentPage += pdfPageCounts.description;
     }
 
-    // 3. Generate Table of Contents (estimate page numbers first)
-    const tocStartPage = currentPage;
-    let tocPagesEstimate = 1;
-    if (articlesMetadata.length > 15) {
-      tocPagesEstimate = Math.ceil(articlesMetadata.length / 15);
-    }
-    currentPage += tocPagesEstimate;
-
-    // 4. Process articles and calculate their page numbers
+    // 3. Process articles FIRST to get their page numbers
     const articlePdfPaths = [];
     const articlesWithPages = [];
+    let articlesStartPage = currentPage;
 
     if (req.files.articles) {
       // Sort articles according to metadata order
@@ -686,31 +681,24 @@ app.post('/api/generate-journal', upload.fields([
       }
     }
 
-    // 5. Generate TOC with actual page numbers
+    // 4. Generate TOC AFTER articles (TOC goes between articles and final page)
     let tocPdfPath = null;
+    const tocStartPage = currentPage; // TOC starts after articles
+
     if (articlesWithPages.length > 0) {
       console.log('Generating Table of Contents...');
       const tocBuffer = await generateTableOfContentsPdf(articlesWithPages, tocStartPage);
       tocPdfPath = path.join(sessionDir, `toc-${Date.now()}.pdf`);
       await fs.writeFile(tocPdfPath, tocBuffer);
 
-      // Recalculate if TOC pages changed
+      // Get actual TOC page count
       const tocDoc = await PDFDocument.load(tocBuffer);
-      const actualTocPages = tocDoc.getPageCount();
-      if (actualTocPages !== tocPagesEstimate) {
-        console.log(`TOC pages: estimated ${tocPagesEstimate}, actual ${actualTocPages}`);
-        // Adjust article page numbers
-        const pageDiff = actualTocPages - tocPagesEstimate;
-        articlesWithPages.forEach(article => {
-          article.pageNumber += pageDiff;
-        });
-        // Regenerate TOC with corrected page numbers
-        const correctedTocBuffer = await generateTableOfContentsPdf(articlesWithPages, tocStartPage);
-        await fs.writeFile(tocPdfPath, correctedTocBuffer);
-      }
+      const tocPageCount = tocDoc.getPageCount();
+      currentPage += tocPageCount;
+      console.log(`TOC generated: ${tocPageCount} page(s), starting at page ${tocStartPage}`);
     }
 
-    // 6. Process final page
+    // 5. Process final page
     let finalPdfPath = null;
     if (req.files.finalPage?.[0]) {
       const file = req.files.finalPage[0];
@@ -722,7 +710,8 @@ app.post('/api/generate-journal', upload.fields([
       }
     }
 
-    // 7. Merge all PDFs in correct order
+    // 6. Merge all PDFs in correct order:
+    // Cover -> Description -> Articles -> TOC -> Final
     const allPdfPaths = [];
 
     // Cover
@@ -733,16 +722,16 @@ app.post('/api/generate-journal', upload.fields([
     const descPdf = pdfPaths.find(p => p.type === 'description');
     if (descPdf) allPdfPaths.push(descPdf.path);
 
-    // TOC
-    if (tocPdfPath) allPdfPaths.push(tocPdfPath);
-
     // Articles
     allPdfPaths.push(...articlePdfPaths);
+
+    // TOC (before final page)
+    if (tocPdfPath) allPdfPaths.push(tocPdfPath);
 
     // Final
     if (finalPdfPath) allPdfPaths.push(finalPdfPath);
 
-    console.log('Merging PDFs:', allPdfPaths.length, 'files');
+    console.log('Merging PDFs:', allPdfPaths.length, 'files in order: Cover, Description, Articles, TOC, Final');
 
     // Merge all PDFs
     const outputPath = path.join(sessionDir, `journal-${Date.now()}.pdf`);
