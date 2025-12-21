@@ -42,6 +42,9 @@ RUN cd server && npm ci --only=production
 # Copy server code
 COPY server/ ./server/
 
+# Copy shared code (used by both frontend and backend)
+COPY shared/ ./shared/
+
 # Copy built frontend
 COPY --from=frontend-builder /app/dist ./public
 
