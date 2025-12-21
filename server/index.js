@@ -168,29 +168,48 @@ async function addPageNumbers(pdfBuffer, startPage = 2) {
 /**
  * Load Cyrillic font for PDF generation
  * Tries system fonts first, then falls back to embedded font
- * @returns {Promise<Buffer|null>} - Font buffer or null if not found
+ * @returns {Promise<{regular: Buffer, bold: Buffer}|null>} - Font buffers or null if not found
  */
 async function loadCyrillicFont() {
-  // Common paths for DejaVu fonts on Linux
-  const fontPaths = [
+  // Try Liberation Serif first (best Cyrillic support)
+  const liberationPaths = {
+    regular: '/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf',
+    bold: '/usr/share/fonts/truetype/liberation/LiberationSerif-Bold.ttf'
+  };
+
+  try {
+    const regular = await fs.readFile(liberationPaths.regular);
+    const bold = await fs.readFile(liberationPaths.bold);
+    console.log('Loaded Liberation Serif font with Cyrillic support');
+    return { regular, bold };
+  } catch {
+    console.log('Liberation Serif not found, trying DejaVu...');
+  }
+
+  // Fallback to DejaVu Sans
+  const dejavuPaths = [
     '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
     '/usr/share/fonts/TTF/DejaVuSans.ttf',
-    '/usr/share/fonts/dejavu/DejaVuSans.ttf',
-    '/usr/share/fonts/truetype/freefont/FreeSans.ttf',
-    '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
-    // macOS paths
-    '/System/Library/Fonts/Helvetica.ttc',
-    '/Library/Fonts/Arial.ttf'
+    '/usr/share/fonts/dejavu/DejaVuSans.ttf'
   ];
 
-  for (const fontPath of fontPaths) {
+  for (const fontPath of dejavuPaths) {
     try {
       const fontBuffer = await fs.readFile(fontPath);
-      console.log(`Loaded Cyrillic font: ${fontPath}`);
-      return fontBuffer;
+      console.log(`Loaded DejaVu Sans font: ${fontPath}`);
+      return { regular: fontBuffer, bold: fontBuffer };
     } catch {
       // Try next font
     }
+  }
+
+  // Try FreeSans
+  try {
+    const fontBuffer = await fs.readFile('/usr/share/fonts/truetype/freefont/FreeSans.ttf');
+    console.log('Loaded FreeSans font');
+    return { regular: fontBuffer, bold: fontBuffer };
+  } catch {
+    // Continue
   }
 
   console.warn('No Cyrillic font found, Table of Contents will use Latin fallback');
@@ -218,15 +237,15 @@ async function generateTableOfContentsPdf(articles, tocStartPage) {
   const lineHeight = 17; // ~6mm
 
   // Try to load Cyrillic font
-  const fontBuffer = await loadCyrillicFont();
+  const fontBuffers = await loadCyrillicFont();
   let font, fontBold;
 
-  if (fontBuffer) {
+  if (fontBuffers) {
     try {
       // Use subset: false to include all Cyrillic characters
-      font = await pdfDoc.embedFont(fontBuffer, { subset: false });
-      fontBold = font; // DejaVu Sans doesn't have separate bold, use same
-      console.log('Cyrillic font embedded successfully');
+      font = await pdfDoc.embedFont(fontBuffers.regular, { subset: false });
+      fontBold = await pdfDoc.embedFont(fontBuffers.bold, { subset: false });
+      console.log('Cyrillic fonts embedded successfully');
     } catch (err) {
       console.warn('Failed to embed Cyrillic font:', err.message);
       font = await pdfDoc.embedFont(StandardFonts.TimesRoman);
@@ -393,6 +412,79 @@ async function generateTableOfContentsPdf(articles, tocStartPage) {
 
   // Add page number to last page
   const pageNumText = String(currentPageNum);
+  const pageNumWidth = font.widthOfTextAtSize(pageNumText, 10);
+  page.drawText(pageNumText, {
+    x: (pageWidth - pageNumWidth) / 2,
+    y: 20,
+    size: 10,
+    font: font,
+    color: rgb(0, 0, 0),
+  });
+
+  return Buffer.from(await pdfDoc.save());
+}
+
+/**
+ * Generate a section header page
+ * @param {string} sectionName - Section name (e.g., "ТЕХНИЧЕСКИЕ НАУКИ")
+ * @param {number} pageNum - Page number for this page
+ * @returns {Promise<Buffer>} - PDF buffer with section header
+ */
+async function generateSectionHeaderPdf(sectionName, pageNum) {
+  const pdfDoc = await PDFDocument.create();
+  pdfDoc.registerFontkit(fontkit);
+
+  // Page dimensions (A4)
+  const pageWidth = 595.28;
+  const pageHeight = 841.89;
+  const marginTop = 85.04;
+
+  // Load Cyrillic font
+  const fontBuffers = await loadCyrillicFont();
+  let fontBold;
+
+  if (fontBuffers) {
+    try {
+      fontBold = await pdfDoc.embedFont(fontBuffers.bold, { subset: false });
+    } catch {
+      fontBold = await pdfDoc.embedFont(StandardFonts.TimesRomanBold);
+    }
+  } else {
+    fontBold = await pdfDoc.embedFont(StandardFonts.TimesRomanBold);
+  }
+
+  const page = pdfDoc.addPage([pageWidth, pageHeight]);
+
+  // Section header - centered, bold, large font
+  const titleSize = 18;
+  try {
+    const titleWidth = fontBold.widthOfTextAtSize(sectionName, titleSize);
+    page.drawText(sectionName, {
+      x: (pageWidth - titleWidth) / 2,
+      y: pageHeight - marginTop - 50,
+      size: titleSize,
+      font: fontBold,
+      color: rgb(0, 0.2, 0.4), // Dark blue
+    });
+
+    // Add underline
+    const underlineY = pageHeight - marginTop - 55;
+    page.drawLine({
+      start: { x: (pageWidth - titleWidth) / 2, y: underlineY },
+      end: { x: (pageWidth + titleWidth) / 2, y: underlineY },
+      thickness: 1,
+      color: rgb(0, 0.2, 0.4),
+    });
+  } catch (err) {
+    console.warn('Failed to draw section header:', err.message);
+  }
+
+  // Add page number at bottom
+  const font = fontBuffers ?
+    await pdfDoc.embedFont(fontBuffers.regular, { subset: false }).catch(() => pdfDoc.embedFont(StandardFonts.TimesRoman)) :
+    await pdfDoc.embedFont(StandardFonts.TimesRoman);
+
+  const pageNumText = String(pageNum);
   const pageNumWidth = font.widthOfTextAtSize(pageNumText, 10);
   page.drawText(pageNumText, {
     x: (pageWidth - pageNumWidth) / 2,
@@ -632,23 +724,14 @@ app.post('/api/generate-journal', upload.fields([
       currentPage += pdfPageCounts.description;
     }
 
-    // 3. Process articles FIRST to get their page numbers
-    const articlePdfPaths = [];
-    const articlesWithPages = [];
-    let articlesStartPage = currentPage;
+    // Helper function to detect if text is Cyrillic
+    const isCyrillic = (text) => /[а-яёА-ЯЁ]/.test(text);
+
+    // 3. Process and convert all articles to PDF first
+    const articleData = [];
 
     if (req.files.articles) {
-      // Sort articles according to metadata order
-      const sortedArticles = [...req.files.articles];
-      if (articlesMetadata.length > 0) {
-        sortedArticles.sort((a, b) => {
-          const indexA = articlesMetadata.findIndex(m => m.fileName === a.originalname);
-          const indexB = articlesMetadata.findIndex(m => m.fileName === b.originalname);
-          return indexA - indexB;
-        });
-      }
-
-      for (const file of sortedArticles) {
+      for (const file of req.files.articles) {
         console.log(`Processing article: ${file.originalname}`);
 
         let pdfPath;
@@ -670,20 +753,72 @@ app.post('/api/generate-journal', upload.fields([
           section: SECTION_ORDER[0]
         };
 
-        articlesWithPages.push({
+        articleData.push({
           ...meta,
-          pageNumber: currentPage,
+          pdfPath,
           pageCount: articlePageCount
         });
-
-        articlePdfPaths.push(pdfPath);
-        currentPage += articlePageCount;
       }
     }
 
-    // 4. Generate TOC AFTER articles (TOC goes between articles and final page)
+    // 4. Group articles by section and sort within each section
+    const articlesBySection = {};
+    for (const section of SECTION_ORDER) {
+      articlesBySection[section] = articleData
+        .filter(a => a.section === section)
+        .sort((a, b) => {
+          // Sort: Cyrillic first, then Latin, alphabetically by author
+          const aIsCyrillic = isCyrillic(a.author);
+          const bIsCyrillic = isCyrillic(b.author);
+
+          if (aIsCyrillic && !bIsCyrillic) return -1;
+          if (!aIsCyrillic && bIsCyrillic) return 1;
+
+          // Same script - sort alphabetically by author
+          return a.author.localeCompare(b.author, aIsCyrillic ? 'ru' : 'en');
+        });
+    }
+
+    // 5. Build ordered list with section headers and calculate page numbers
+    const orderedPdfs = []; // Array of {type: 'section'|'article', path, pageCount, data}
+    const articlesWithPages = [];
+
+    for (const sectionName of SECTION_ORDER) {
+      const sectionArticles = articlesBySection[sectionName];
+      if (!sectionArticles || sectionArticles.length === 0) continue;
+
+      // Add section header page
+      console.log(`Generating section header: ${sectionName}`);
+      const sectionHeaderBuffer = await generateSectionHeaderPdf(sectionName, currentPage);
+      const sectionHeaderPath = path.join(sessionDir, `section-${Date.now()}-${SECTION_ORDER.indexOf(sectionName)}.pdf`);
+      await fs.writeFile(sectionHeaderPath, sectionHeaderBuffer);
+
+      orderedPdfs.push({
+        type: 'section',
+        path: sectionHeaderPath,
+        pageCount: 1
+      });
+      currentPage += 1;
+
+      // Add articles in this section
+      for (const article of sectionArticles) {
+        articlesWithPages.push({
+          ...article,
+          pageNumber: currentPage
+        });
+
+        orderedPdfs.push({
+          type: 'article',
+          path: article.pdfPath,
+          pageCount: article.pageCount
+        });
+        currentPage += article.pageCount;
+      }
+    }
+
+    // 6. Generate TOC AFTER articles (TOC goes between articles and final page)
     let tocPdfPath = null;
-    const tocStartPage = currentPage; // TOC starts after articles
+    const tocStartPage = currentPage;
 
     if (articlesWithPages.length > 0) {
       console.log('Generating Table of Contents...');
@@ -698,7 +833,7 @@ app.post('/api/generate-journal', upload.fields([
       console.log(`TOC generated: ${tocPageCount} page(s), starting at page ${tocStartPage}`);
     }
 
-    // 5. Process final page
+    // 7. Process final page
     let finalPdfPath = null;
     if (req.files.finalPage?.[0]) {
       const file = req.files.finalPage[0];
@@ -710,8 +845,8 @@ app.post('/api/generate-journal', upload.fields([
       }
     }
 
-    // 6. Merge all PDFs in correct order:
-    // Cover -> Description -> Articles -> TOC -> Final
+    // 8. Merge all PDFs in correct order:
+    // Cover -> Description -> [Section Header -> Articles]... -> TOC -> Final
     const allPdfPaths = [];
 
     // Cover
@@ -722,8 +857,10 @@ app.post('/api/generate-journal', upload.fields([
     const descPdf = pdfPaths.find(p => p.type === 'description');
     if (descPdf) allPdfPaths.push(descPdf.path);
 
-    // Articles
-    allPdfPaths.push(...articlePdfPaths);
+    // Section headers and Articles (in order)
+    for (const pdf of orderedPdfs) {
+      allPdfPaths.push(pdf.path);
+    }
 
     // TOC (before final page)
     if (tocPdfPath) allPdfPaths.push(tocPdfPath);
@@ -731,7 +868,7 @@ app.post('/api/generate-journal', upload.fields([
     // Final
     if (finalPdfPath) allPdfPaths.push(finalPdfPath);
 
-    console.log('Merging PDFs:', allPdfPaths.length, 'files in order: Cover, Description, Articles, TOC, Final');
+    console.log('Merging PDFs:', allPdfPaths.length, 'files in order: Cover, Description, [Sections+Articles], TOC, Final');
 
     // Merge all PDFs
     const outputPath = path.join(sessionDir, `journal-${Date.now()}.pdf`);
