@@ -15,13 +15,11 @@ import { fileURLToPath } from 'url';
 import { v4 as uuidv4 } from 'uuid';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
-
-// Section order for Table of Contents
-const SECTION_ORDER = [
-  'ТЕХНИЧЕСКИЕ НАУКИ',
-  'ПЕДАГОГИЧЕСКИЕ НАУКИ',
-  'ЕСТЕСТВЕННЫЕ И ЭКОНОМИЧЕСКИЕ НАУКИ'
-];
+import {
+  SECTION_ORDER,
+  NEEDS_REVIEW_SECTION,
+  isValidSection
+} from '../shared/sections.js';
 
 const execAsync = promisify(exec);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

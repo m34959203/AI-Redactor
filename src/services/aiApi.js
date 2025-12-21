@@ -3,15 +3,24 @@
  * Supports Russian, English, and Kazakh languages
  */
 
+import {
+  ARTICLE_SECTIONS,
+  SECTION_METADATA,
+  CONFIDENCE_THRESHOLDS,
+  NEEDS_REVIEW_SECTION,
+  isValidSection
+} from '../constants/sections';
+
 const API_URL = "https://openrouter.ai/api/v1/chat/completions";
 const MODEL = "tngtech/deepseek-r1t2-chimera:free";
 const FALLBACK_MODEL = "deepseek/deepseek-r1:free"; // Updated to working model
 
 // System prompt for consistent AI behavior
-const SYSTEM_PROMPT = `Ты - помощник редактора научного журнала.
+const SYSTEM_PROMPT = `Ты - эксперт-классификатор научных публикаций для академического журнала.
 Ты анализируешь научные статьи на русском, английском и казахском языках.
 Всегда отвечай ТОЛЬКО в формате JSON без дополнительного текста.
-Не добавляй пояснения до или после JSON.`;
+Не добавляй пояснения до или после JSON.
+При классификации учитывай методологию, объект исследования и ключевые термины.`;
 
 /**
  * Extracts JSON from AI response that may contain <think> tags or other text
@@ -430,68 +439,125 @@ ${content.substring(0, 5000)}
   }
 };
 
+// Re-export ARTICLE_SECTIONS for backward compatibility
+export { ARTICLE_SECTIONS } from '../constants/sections';
+
 /**
- * Available scientific sections for the journal
+ * Generates dynamic section descriptions for the prompt
+ * @returns {string} - Formatted section descriptions
  */
-export const ARTICLE_SECTIONS = [
-  'ТЕХНИЧЕСКИЕ НАУКИ',
-  'ПЕДАГОГИЧЕСКИЕ НАУКИ',
-  'ЕСТЕСТВЕННЫЕ И ЭКОНОМИЧЕСКИЕ НАУКИ'
-];
+const generateSectionDescriptions = () => {
+  return ARTICLE_SECTIONS.map((section, index) => {
+    const meta = SECTION_METADATA[section];
+    const keywords = meta.keywords.slice(0, 10).join(', ');
+    return `${index + 1}. ${section}\n   Ключевые темы: ${keywords}\n   Описание: ${meta.description}`;
+  }).join('\n\n');
+};
 
 /**
  * Detects the thematic section of a scientific article using AI
+ * Returns section name with confidence score
+ *
  * @param {string} content - Article content
  * @param {string} title - Article title
- * @returns {Promise<string>} - Section name
+ * @returns {Promise<{section: string, confidence: number, needsReview: boolean, reasoning?: string}>}
  */
 export const detectArticleSection = async (content, title) => {
-  const prompt = `Определи тематический раздел научной статьи.
+  const sectionDescriptions = generateSectionDescriptions();
 
-ДОСТУПНЫЕ РАЗДЕЛЫ:
-1. ТЕХНИЧЕСКИЕ НАУКИ - инженерия, IT, программирование, машиностроение, строительство, архитектура, электроника, автоматизация, транспорт, энергетика
-2. ПЕДАГОГИЧЕСКИЕ НАУКИ - образование, методика преподавания, дидактика, воспитание, психология обучения, педагогика, учебные программы
-3. ЕСТЕСТВЕННЫЕ И ЭКОНОМИЧЕСКИЕ НАУКИ - физика, химия, биология, экология, математика, экономика, финансы, менеджмент, маркетинг, бухгалтерия, медицина, география
+  const prompt = `Ты - эксперт по классификации научных публикаций.
+Твоя задача: определить ОДИН тематический раздел для научной статьи и оценить уверенность.
 
-ПРАВИЛА:
-- Выбери ОДИН наиболее подходящий раздел из списка выше
-- Основывайся на ключевых словах, теме и содержании статьи
-- Если статья междисциплинарная, выбери преобладающую тему
-- Верни ТОЧНОЕ название раздела как в списке
+## ДОСТУПНЫЕ РАЗДЕЛЫ:
 
-ПРИМЕРЫ:
-Вход: "Разработка алгоритма машинного обучения для распознавания образов"
-Выход: {"section": "ТЕХНИЧЕСКИЕ НАУКИ"}
+${sectionDescriptions}
 
-Вход: "Методика обучения математике в начальной школе"
-Выход: {"section": "ПЕДАГОГИЧЕСКИЕ НАУКИ"}
+## ПРАВИЛА КЛАССИФИКАЦИИ:
 
-Вход: "Анализ финансовых показателей предприятия"
-Выход: {"section": "ЕСТЕСТВЕННЫЕ И ЭКОНОМИЧЕСКИЕ НАУКИ"}
+1. **Приоритет МЕТОДОЛОГИИ**:
+   - Статья о преподавании IT/программирования → ПЕДАГОГИЧЕСКИЕ НАУКИ
+   - Статья о методике обучения физике → ПЕДАГОГИЧЕСКИЕ НАУКИ
 
-НАЗВАНИЕ СТАТЬИ: "${title}"
-НАЧАЛО ТЕКСТА: ${content.substring(0, 2000)}
+2. **Приоритет ОБЪЕКТА исследования**:
+   - Разработка технологии для медицины → ТЕХНИЧЕСКИЕ НАУКИ
+   - Разработка программного обеспечения для экономического анализа → ТЕХНИЧЕСКИЕ НАУКИ
 
-Ответь JSON: {"section": "..."}`;
+3. **При равном соотношении**: выбери раздел по ОСНОВНОЙ теме первых абзацев
 
-  const fallback = ARTICLE_SECTIONS[0]; // Default to first section
+4. **Оценка уверенности (confidence)**:
+   - 0.9-1.0: Очевидная принадлежность, все ключевые слова указывают на один раздел
+   - 0.7-0.89: Высокая уверенность, большинство признаков указывают на раздел
+   - 0.5-0.69: Средняя уверенность, есть признаки нескольких разделов
+   - 0.3-0.49: Низкая уверенность, статья междисциплинарная
+   - 0.0-0.29: Очень низкая уверенность, требуется ручная проверка
+
+## ВХОДНЫЕ ДАННЫЕ:
+
+**Название статьи:** "${title}"
+
+**Текст статьи (начало):**
+${content.substring(0, 2500)}
+
+## ФОРМАТ ОТВЕТА (строго JSON):
+{
+  "section": "ТОЧНОЕ_НАЗВАНИЕ_РАЗДЕЛА",
+  "confidence": 0.85,
+  "reasoning": "Краткое объяснение выбора (1 предложение)"
+}`;
+
+  const fallbackResult = {
+    section: NEEDS_REVIEW_SECTION,
+    confidence: 0,
+    needsReview: true,
+    reasoning: 'Не удалось выполнить автоматическую классификацию'
+  };
 
   try {
-    const response = await makeAIRequest(prompt, 300);
-    const result = safeJsonParse(response, { section: fallback });
+    const response = await makeAIRequest(prompt, 500);
+    const result = safeJsonParse(response, null);
 
-    // Validate that returned section is one of the allowed ones
-    const detectedSection = result.section?.toUpperCase?.() || fallback;
+    if (!result || !result.section) {
+      console.warn('Invalid AI response for section detection');
+      return fallbackResult;
+    }
+
+    // Validate and normalize section
+    const detectedSection = result.section?.toUpperCase?.()?.trim() || '';
 
     // Find matching section (case-insensitive partial match)
     const matchedSection = ARTICLE_SECTIONS.find(s =>
+      s.toUpperCase() === detectedSection ||
       s.toUpperCase().includes(detectedSection.replace(/\s+/g, ' ').trim()) ||
       detectedSection.includes(s.toUpperCase())
     );
 
-    return matchedSection || fallback;
+    // Normalize confidence to 0-1 range
+    const confidence = Math.max(0, Math.min(1, Number(result.confidence) || 0.5));
+
+    // Determine if manual review is needed
+    const needsReview = !matchedSection || confidence < CONFIDENCE_THRESHOLDS.LOW;
+
+    return {
+      section: matchedSection || NEEDS_REVIEW_SECTION,
+      confidence: matchedSection ? confidence : 0,
+      needsReview,
+      reasoning: result.reasoning || undefined
+    };
   } catch (error) {
     console.error("Section detection error:", error);
-    return fallback;
+    return fallbackResult;
   }
+};
+
+/**
+ * Simple version of detectArticleSection that returns only section string
+ * For backward compatibility
+ *
+ * @param {string} content - Article content
+ * @param {string} title - Article title
+ * @returns {Promise<string>} - Section name
+ */
+export const detectArticleSectionSimple = async (content, title) => {
+  const result = await detectArticleSection(content, title);
+  return result.section;
 };
