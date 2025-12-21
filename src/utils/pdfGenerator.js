@@ -7,6 +7,7 @@ import html2canvas from 'html2canvas';
 import { convertDocxToHtml, readFileAsArrayBuffer } from './docxConverter';
 import { registerCyrillicFont, getFontName, preloadFonts } from './fontLoader';
 import { checkServerHealth, generateJournalPdf } from './apiService';
+import { groupArticlesBySection, SECTION_ORDER } from './languageDetection';
 
 // Constants (based on "Вестник ЖезУ" journal requirements)
 const PAGE_WIDTH = 210; // A4 width in mm
@@ -710,9 +711,9 @@ const addSpecialPage = async (doc, pageData, pageNum, pageName = 'страниц
 };
 
 /**
- * Generates table of contents
+ * Generates table of contents with section headers
  * @param {jsPDF} doc - jsPDF instance
- * @param {Array} tocEntries - Array of {title, author, page}
+ * @param {Array} tocEntries - Array of {title, author, page, section}
  * @param {number} startPage - Page number for TOC
  * @returns {number} - Number of pages used for TOC
  */
@@ -726,40 +727,77 @@ const generateTableOfContents = (doc, tocEntries, startPage) => {
   doc.setFontSize(16);
   doc.setFont(fontName, 'bold');
   doc.text('СОДЕРЖАНИЕ', PAGE_WIDTH / 2, currentY, { align: 'center' });
-  currentY += LINE_HEIGHT * 2;
+  currentY += LINE_HEIGHT * 2.5;
 
-  doc.setFontSize(11);
-  doc.setFont(fontName, 'normal');
+  // Group entries by section
+  const entriesBySection = {};
+  tocEntries.forEach(entry => {
+    const section = entry.section || SECTION_ORDER[0];
+    if (!entriesBySection[section]) {
+      entriesBySection[section] = [];
+    }
+    entriesBySection[section].push(entry);
+  });
 
-  for (let i = 0; i < tocEntries.length; i++) {
-    const entry = tocEntries[i];
+  let articleNumber = 1;
 
-    if (currentY + LINE_HEIGHT * 2 > PAGE_HEIGHT - MARGIN_BOTTOM) {
+  // Iterate through sections in order
+  for (const sectionName of SECTION_ORDER) {
+    const sectionEntries = entriesBySection[sectionName];
+    if (!sectionEntries || sectionEntries.length === 0) continue;
+
+    // Check if we need a new page for section header
+    if (currentY + LINE_HEIGHT * 4 > PAGE_HEIGHT - MARGIN_BOTTOM) {
       addPageNumber(doc, currentPage);
       doc.addPage();
       currentPage++;
       currentY = MARGIN_TOP;
     }
 
-    // Article number and title
-    const titleText = `${i + 1}. ${entry.title}`;
-    const titleLines = splitTextToLines(doc, titleText, CONTENT_WIDTH - 20);
+    // Section header
+    doc.setFontSize(12);
+    doc.setFont(fontName, 'bold');
+    doc.setTextColor(0, 51, 102); // Dark blue
+    doc.text(sectionName, PAGE_WIDTH / 2, currentY, { align: 'center' });
+    doc.setTextColor(0, 0, 0);
+    currentY += LINE_HEIGHT * 2;
 
-    for (const line of titleLines) {
-      doc.text(line, MARGIN_LEFT, currentY);
-      currentY += LINE_HEIGHT;
+    doc.setFontSize(11);
+    doc.setFont(fontName, 'normal');
+
+    // Articles in section
+    for (const entry of sectionEntries) {
+      if (currentY + LINE_HEIGHT * 3 > PAGE_HEIGHT - MARGIN_BOTTOM) {
+        addPageNumber(doc, currentPage);
+        doc.addPage();
+        currentPage++;
+        currentY = MARGIN_TOP;
+      }
+
+      // Article number and title
+      const titleText = `${articleNumber}. ${entry.title}`;
+      const titleLines = splitTextToLines(doc, titleText, CONTENT_WIDTH - 20);
+
+      for (const line of titleLines) {
+        doc.text(line, MARGIN_LEFT, currentY);
+        currentY += LINE_HEIGHT;
+      }
+
+      // Author and page number
+      const authorText = `    ${entry.author}`;
+      doc.setTextColor(100, 100, 100);
+      doc.text(authorText, MARGIN_LEFT, currentY);
+
+      // Page number on the right
+      doc.text(String(entry.page), PAGE_WIDTH - MARGIN_RIGHT, currentY, { align: 'right' });
+      doc.setTextColor(0, 0, 0);
+
+      currentY += LINE_HEIGHT * 1.5;
+      articleNumber++;
     }
 
-    // Author and page number
-    const authorText = `    ${entry.author}`;
-    doc.setTextColor(100, 100, 100);
-    doc.text(authorText, MARGIN_LEFT, currentY);
-
-    // Page number on the right
-    doc.text(String(entry.page), PAGE_WIDTH - MARGIN_RIGHT, currentY, { align: 'right' });
-    doc.setTextColor(0, 0, 0);
-
-    currentY += LINE_HEIGHT * 1.5;
+    // Add space after section
+    currentY += LINE_HEIGHT;
   }
 
   addPageNumber(doc, currentPage);
@@ -767,7 +805,38 @@ const generateTableOfContents = (doc, tocEntries, startPage) => {
 };
 
 /**
- * Main PDF generation function
+ * Adds section header page to PDF
+ * @param {jsPDF} doc - jsPDF instance
+ * @param {string} sectionName - Section name
+ * @param {number} pageNum - Current page number
+ * @returns {number} - Current Y position after header
+ */
+const addSectionHeader = (doc, sectionName, pageNum) => {
+  const fontName = getFontName();
+
+  // Section header - centered, bold, larger font
+  doc.setFontSize(16);
+  doc.setFont(fontName, 'bold');
+  doc.setTextColor(0, 51, 102); // Dark blue
+  doc.text(sectionName, PAGE_WIDTH / 2, MARGIN_TOP, { align: 'center' });
+  doc.setTextColor(0, 0, 0);
+
+  // Underline
+  const textWidth = doc.getTextWidth(sectionName);
+  doc.setDrawColor(0, 51, 102);
+  doc.setLineWidth(0.5);
+  doc.line(
+    (PAGE_WIDTH - textWidth) / 2,
+    MARGIN_TOP + 2,
+    (PAGE_WIDTH + textWidth) / 2,
+    MARGIN_TOP + 2
+  );
+
+  return MARGIN_TOP + LINE_HEIGHT * 3;
+};
+
+/**
+ * Main PDF generation function with proper section grouping and TOC at the beginning
  * @param {Object} issue - Issue data
  * @param {Array} articles - Full articles array with files
  * @param {Object} coverPage - Cover page data
@@ -789,8 +858,11 @@ export const generatePDF = async (issue, articles, coverPage, descriptionPage, f
 
   let currentPage = 1;
   const tocEntries = [];
-  const totalSteps = 3 + articles.length; // cover, desc, articles, final
+  const totalSteps = 4 + articles.length; // cover, desc, toc, articles, final
   let currentStep = 0;
+
+  // Group articles by section
+  const groupedArticles = groupArticlesBySection(articles);
 
   try {
     // 1. Cover page
@@ -803,77 +875,126 @@ export const generatePDF = async (issue, articles, coverPage, descriptionPage, f
     currentPage++;
     currentPage = await addSpecialPage(doc, descriptionPage, currentPage, 'Описание и редакция');
 
-    // 3. Articles
-    for (let i = 0; i < articles.length; i++) {
-      const article = articles[i];
-      onProgress({
-        step: ++currentStep,
-        total: totalSteps,
-        message: `Обработка статьи ${i + 1}/${articles.length}: ${article.title.substring(0, 30)}...`
-      });
+    // 3. First pass - calculate article positions for TOC
+    // We need to estimate pages for TOC first, then adjust
+    const tocPagesEstimate = Math.ceil(articles.length / 15) + 1; // Rough estimate
+    let estimatedArticleStartPage = currentPage + tocPagesEstimate + 1;
 
-      doc.addPage();
-      currentPage++;
+    // Build TOC entries with estimated pages (will be corrected in second pass)
+    let articleIndex = 0;
+    let estimatedPage = estimatedArticleStartPage;
 
-      // Add 4 empty lines before article (except first)
-      let startY = MARGIN_TOP;
-      if (i > 0) {
-        startY = addEmptyLinesBeforeArticle(doc, MARGIN_TOP);
+    for (const sectionName of SECTION_ORDER) {
+      const sectionArticles = groupedArticles[sectionName];
+      if (!sectionArticles || sectionArticles.length === 0) continue;
+
+      // Section header takes half page estimate
+      estimatedPage++;
+
+      for (const article of sectionArticles) {
+        tocEntries.push({
+          title: article.title,
+          author: article.author,
+          section: article.section,
+          page: estimatedPage // Will be updated
+        });
+        // Estimate 2 pages per article average
+        estimatedPage += 2;
+        articleIndex++;
       }
-
-      // Record page for TOC
-      const articleStartPage = currentPage;
-
-      const fontName = getFontName();
-
-      // Article header
-      doc.setFontSize(14);
-      doc.setFont(fontName, 'bold');
-      const titleLines = splitTextToLines(doc, article.title, CONTENT_WIDTH);
-      for (const line of titleLines) {
-        doc.text(line, MARGIN_LEFT, startY);
-        startY += LINE_HEIGHT;
-      }
-
-      // Author
-      doc.setFontSize(11);
-      doc.setFont(fontName, 'normal');
-      doc.setTextColor(80, 80, 80);
-      doc.text(article.author, MARGIN_LEFT, startY);
-      doc.setTextColor(0, 0, 0);
-      startY += LINE_HEIGHT * 2;
-
-      doc.setFont(fontName, 'normal');
-
-      // Article content - render as image to preserve original Word formatting
-      if (article.file) {
-        try {
-          const { html, images } = await convertDocxToHtml(article.file);
-          console.log(`Article "${article.title}": HTML=${html?.length || 0} chars, images=${images?.length || 0}`);
-          // Use html2canvas to preserve original formatting
-          const result = await renderHtmlAsImage(doc, html, startY, currentPage);
-          currentPage = result.endPage;
-          addPageNumber(doc, currentPage);
-        } catch (error) {
-          console.error('Error processing article:', error);
-          doc.text('Ошибка загрузки содержимого статьи', MARGIN_LEFT, startY);
-          addPageNumber(doc, currentPage);
-        }
-      }
-
-      tocEntries.push({
-        title: article.title,
-        author: article.author,
-        page: articleStartPage
-      });
     }
 
-    // 4. Table of Contents (inserted after description, we need to note the page)
+    // 4. Generate Table of Contents (after description)
+    onProgress({ step: ++currentStep, total: totalSteps, message: 'Генерация содержания...' });
     const tocStartPage = currentPage + 1;
-    generateTableOfContents(doc, tocEntries, tocStartPage);
-    currentPage = tocStartPage;
+    const tocPagesUsed = generateTableOfContents(doc, tocEntries, tocStartPage);
+    currentPage = tocStartPage + tocPagesUsed - 1;
 
-    // 5. Final page
+    // 5. Now add articles with section headers
+    let lastSection = null;
+    let globalArticleIndex = 0;
+
+    for (const sectionName of SECTION_ORDER) {
+      const sectionArticles = groupedArticles[sectionName];
+      if (!sectionArticles || sectionArticles.length === 0) continue;
+
+      // Add section header page
+      doc.addPage();
+      currentPage++;
+      addPageNumber(doc, currentPage);
+      const startY = addSectionHeader(doc, sectionName, currentPage);
+
+      // Track if this is the first article in section
+      let isFirstInSection = true;
+
+      for (const article of sectionArticles) {
+        onProgress({
+          step: ++currentStep,
+          total: totalSteps,
+          message: `Обработка статьи ${globalArticleIndex + 1}/${articles.length}: ${article.title.substring(0, 30)}...`
+        });
+
+        // Start new page for each article (except first in section if it fits)
+        if (!isFirstInSection) {
+          doc.addPage();
+          currentPage++;
+        }
+        isFirstInSection = false;
+
+        // Update TOC entry with actual page number
+        if (tocEntries[globalArticleIndex]) {
+          tocEntries[globalArticleIndex].page = currentPage;
+        }
+
+        // Add 4 empty lines before article
+        let articleY = isFirstInSection ? startY : MARGIN_TOP;
+        articleY = addEmptyLinesBeforeArticle(doc, articleY);
+
+        const fontName = getFontName();
+
+        // Article header
+        doc.setFontSize(14);
+        doc.setFont(fontName, 'bold');
+        const titleLines = splitTextToLines(doc, article.title, CONTENT_WIDTH);
+        for (const line of titleLines) {
+          doc.text(line, MARGIN_LEFT, articleY);
+          articleY += LINE_HEIGHT;
+        }
+
+        // Author
+        doc.setFontSize(11);
+        doc.setFont(fontName, 'normal');
+        doc.setTextColor(80, 80, 80);
+        doc.text(article.author, MARGIN_LEFT, articleY);
+        doc.setTextColor(0, 0, 0);
+        articleY += LINE_HEIGHT * 2;
+
+        doc.setFont(fontName, 'normal');
+
+        // Article content - render as image to preserve original Word formatting
+        if (article.file) {
+          try {
+            const { html, images } = await convertDocxToHtml(article.file);
+            console.log(`Article "${article.title}": HTML=${html?.length || 0} chars, images=${images?.length || 0}`);
+            const result = await renderHtmlAsImage(doc, html, articleY, currentPage);
+            currentPage = result.endPage;
+            addPageNumber(doc, currentPage);
+          } catch (error) {
+            console.error('Error processing article:', error);
+            doc.text('Ошибка загрузки содержимого статьи', MARGIN_LEFT, articleY);
+            addPageNumber(doc, currentPage);
+          }
+        } else {
+          addPageNumber(doc, currentPage);
+        }
+
+        globalArticleIndex++;
+      }
+
+      lastSection = sectionName;
+    }
+
+    // 6. Final page
     onProgress({ step: totalSteps, total: totalSteps, message: 'Добавление заключительной страницы...' });
     doc.addPage();
     currentPage++;

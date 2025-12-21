@@ -11,9 +11,9 @@ import ArchiveTab from './components/Archive/ArchiveTab';
 import InfoTab from './components/Info/InfoTab';
 
 import { useApp, useNotifications, useProcessing } from './context/AppContext';
-import { extractMetadataWithAI, checkSpelling, reviewArticle } from './services/aiApi';
+import { extractMetadataWithAI, checkSpelling, reviewArticle, detectArticleSection, ARTICLE_SECTIONS } from './services/aiApi';
 import { validatePageFile, validateArticleFile } from './utils/fileValidation';
-import { detectLanguage, sortArticlesByLanguage } from './utils/languageDetection';
+import { detectLanguage, sortArticlesBySectionAndLanguage } from './utils/languageDetection';
 import { validatePdfRequirements, createIssue, generatePDF, generatePDFSmart, downloadPDF } from './utils/pdfGenerator';
 import { convertDocxToText } from './utils/docxConverter';
 import { addToArchive, getPdfBlob, removeFromArchive } from './utils/archiveStorage';
@@ -92,8 +92,8 @@ const App = () => {
   // Articles upload handler
   const handleArticlesUpload = async (files) => {
     const totalFiles = files.length;
-    // 3 steps per file: read, AI analysis, spell check
-    const totalSteps = totalFiles * 3;
+    // 4 steps per file: read, AI metadata, AI section, spell check
+    const totalSteps = totalFiles * 4;
     let currentStep = 0;
     setProcessing(true, 'Загрузка статей...', currentStep, totalSteps);
     const newArticles = [];
@@ -109,7 +109,7 @@ const App = () => {
         const validation = validateArticleFile(file);
         if (!validation.valid) {
           console.warn(`Skipping file ${file.name}: ${validation.error}`);
-          currentStep += 3; // Skip all 3 steps for this file
+          currentStep += 4; // Skip all 4 steps for this file
           continue;
         }
 
@@ -127,12 +127,17 @@ const App = () => {
         const language = detectLanguage(metadata.author);
         currentStep++;
 
+        setProcessing(true, `[${fileNum}/${totalFiles}] Определение раздела: ${file.name}`, currentStep, totalSteps);
+        const section = await detectArticleSection(content, metadata.title);
+        currentStep++;
+
         const article = {
           id: Date.now() + Math.random(),
           file,
           title: metadata.title,
           author: metadata.author,
           language,
+          section,
           content,
         };
 
@@ -145,7 +150,7 @@ const App = () => {
       }
 
       const allArticles = [...articles, ...newArticles];
-      const sortedArticles = sortArticlesByLanguage(allArticles);
+      const sortedArticles = sortArticlesBySectionAndLanguage(allArticles);
 
       actions.setArticles(sortedArticles);
       actions.addSpellCheckResults(spellChecks);
@@ -167,12 +172,12 @@ const App = () => {
     }
     actions.updateArticle(id, updates);
 
-    // Re-sort if author changed
-    if (field === 'author') {
+    // Re-sort if author or section changed
+    if (field === 'author' || field === 'section') {
       const updated = articles.map((a) =>
         a.id === id ? { ...a, ...updates } : a
       );
-      actions.setArticles(sortArticlesByLanguage(updated));
+      actions.setArticles(sortArticlesBySectionAndLanguage(updated));
     }
   };
 

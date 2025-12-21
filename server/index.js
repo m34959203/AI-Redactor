@@ -1,6 +1,7 @@
 /**
  * AI-Redactor Backend Server
  * Provides DOCX to PDF conversion using LibreOffice
+ * Adds page numbering using pdf-lib
  */
 
 import express from 'express';
@@ -12,6 +13,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { v4 as uuidv4 } from 'uuid';
+import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 
 const execAsync = promisify(exec);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -119,15 +121,81 @@ async function convertDocxToPdf(inputPath, outputDir) {
 }
 
 /**
- * Merge multiple PDF files using LibreOffice or pdftk
+ * Add page numbers to a PDF using pdf-lib
+ * @param {Buffer} pdfBuffer - PDF buffer
+ * @param {number} startPage - Start numbering from this page (1-indexed, skip cover)
+ * @returns {Promise<Buffer>} - PDF buffer with page numbers
+ */
+async function addPageNumbers(pdfBuffer, startPage = 2) {
+  try {
+    const pdfDoc = await PDFDocument.load(pdfBuffer);
+    const font = await pdfDoc.embedFont(StandardFonts.TimesRoman);
+    const pages = pdfDoc.getPages();
+
+    for (let i = startPage - 1; i < pages.length; i++) {
+      const page = pages[i];
+      const { width, height } = page.getSize();
+      const pageNum = i + 1;
+
+      // Add page number at bottom center
+      const text = String(pageNum);
+      const textWidth = font.widthOfTextAtSize(text, 10);
+
+      page.drawText(text, {
+        x: (width - textWidth) / 2,
+        y: 20,
+        size: 10,
+        font: font,
+        color: rgb(0, 0, 0),
+      });
+    }
+
+    return Buffer.from(await pdfDoc.save());
+  } catch (error) {
+    console.error('Error adding page numbers:', error);
+    return pdfBuffer; // Return original if fails
+  }
+}
+
+/**
+ * Merge multiple PDF files using pdf-lib (no external tools needed)
+ * Also adds page numbering
  * @param {string[]} pdfPaths - Array of PDF file paths
  * @param {string} outputPath - Path for merged PDF
  */
 async function mergePdfs(pdfPaths, outputPath) {
-  // Try using pdftk first (if available)
+  try {
+    // Use pdf-lib for merging (works everywhere, no external tools)
+    const mergedPdf = await PDFDocument.create();
+
+    for (const pdfPath of pdfPaths) {
+      const pdfBuffer = await fs.readFile(pdfPath);
+      const pdf = await PDFDocument.load(pdfBuffer);
+      const copiedPages = await mergedPdf.copyPages(pdf, pdf.getPageIndices());
+      copiedPages.forEach((page) => mergedPdf.addPage(page));
+    }
+
+    // Save merged PDF
+    const mergedBuffer = await mergedPdf.save();
+
+    // Add page numbers (skip first page - cover)
+    const numberedBuffer = await addPageNumbers(Buffer.from(mergedBuffer), 2);
+
+    await fs.writeFile(outputPath, numberedBuffer);
+    console.log(`Merged ${pdfPaths.length} PDFs with page numbering`);
+    return;
+  } catch (error) {
+    console.log('pdf-lib merge failed, trying external tools...', error.message);
+  }
+
+  // Fallback: Try using pdftk (if available)
   try {
     const inputFiles = pdfPaths.map(p => `"${p}"`).join(' ');
     await execAsync(`pdftk ${inputFiles} cat output "${outputPath}"`, { timeout: 120000 });
+    // Add page numbers to result
+    const buffer = await fs.readFile(outputPath);
+    const numbered = await addPageNumbers(buffer, 2);
+    await fs.writeFile(outputPath, numbered);
     return;
   } catch {
     console.log('pdftk not available, trying alternative method...');
@@ -137,6 +205,10 @@ async function mergePdfs(pdfPaths, outputPath) {
   try {
     const inputFiles = pdfPaths.map(p => `"${p}"`).join(' ');
     await execAsync(`pdfunite ${inputFiles} "${outputPath}"`, { timeout: 120000 });
+    // Add page numbers to result
+    const buffer = await fs.readFile(outputPath);
+    const numbered = await addPageNumbers(buffer, 2);
+    await fs.writeFile(outputPath, numbered);
     return;
   } catch {
     console.log('pdfunite not available, using simple copy for single file...');
@@ -144,7 +216,9 @@ async function mergePdfs(pdfPaths, outputPath) {
 
   // Fallback: if only one PDF, just copy it
   if (pdfPaths.length === 1) {
-    await fs.copyFile(pdfPaths[0], outputPath);
+    const buffer = await fs.readFile(pdfPaths[0]);
+    const numbered = await addPageNumbers(buffer, 2);
+    await fs.writeFile(outputPath, numbered);
     return;
   }
 
