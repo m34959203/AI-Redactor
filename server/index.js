@@ -16,6 +16,8 @@ import { v4 as uuidv4 } from 'uuid';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 
+console.log('=== Server module loading ===');
+
 // Section order for Table of Contents
 const SECTION_ORDER = [
   'ТЕХНИЧЕСКИЕ НАУКИ',
@@ -29,11 +31,18 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+console.log(`Starting server initialization... PORT=${PORT}`);
+
 // Temporary directory for file processing
 const TEMP_DIR = path.join(__dirname, 'temp');
 
 // Ensure temp directory exists
-await fs.mkdir(TEMP_DIR, { recursive: true });
+try {
+  await fs.mkdir(TEMP_DIR, { recursive: true });
+  console.log(`Temp directory ready: ${TEMP_DIR}`);
+} catch (err) {
+  console.error('Failed to create temp directory:', err);
+}
 
 // Middleware
 app.use(cors());
