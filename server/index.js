@@ -90,6 +90,12 @@ app.use((req, res, next) => {
   next();
 });
 
+// Early health check (before all other routes)
+app.get('/api/health', (req, res) => {
+  console.log('Health check requested');
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
 /**
  * Decode filename from latin1 to UTF-8
  * Multer interprets filenames as latin1 by default, but browsers send UTF-8
@@ -652,20 +658,6 @@ setInterval(cleanupTempFiles, 30 * 60 * 1000);
 
 // ============ API ROUTES ============
 
-// Cache LibreOffice availability (checked once at startup)
-let libreOfficeAvailable = null;
-
-/**
- * Health check (fast, non-blocking)
- */
-app.get('/api/health', (req, res) => {
-  res.json({
-    status: 'ok',
-    libreOffice: libreOfficeAvailable,
-    timestamp: new Date().toISOString()
-  });
-});
-
 /**
  * Convert single DOCX to PDF
  * POST /api/convert
@@ -1043,7 +1035,6 @@ app.listen(PORT, () => {
 
   // Check LibreOffice availability asynchronously after server starts
   checkLibreOffice().then(available => {
-    libreOfficeAvailable = available;
     if (available) {
       console.log('✅ LibreOffice is available');
     } else {
