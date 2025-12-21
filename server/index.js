@@ -47,8 +47,9 @@ const storage = multer.diskStorage({
     cb(null, sessionDir);
   },
   filename: (req, file, cb) => {
-    // Preserve original filename with unique prefix
-    const uniqueName = `${Date.now()}-${file.originalname}`;
+    // Preserve original filename with unique prefix (decode UTF-8)
+    const decodedName = decodeFilename(file.originalname);
+    const uniqueName = `${Date.now()}-${decodedName}`;
     cb(null, uniqueName);
   }
 });
@@ -62,10 +63,11 @@ const upload = multer({
       'application/msword',
       'application/pdf'
     ];
+    const decodedName = decodeFilename(file.originalname);
     if (allowedTypes.includes(file.mimetype) ||
-        file.originalname.endsWith('.docx') ||
-        file.originalname.endsWith('.doc') ||
-        file.originalname.endsWith('.pdf')) {
+        decodedName.endsWith('.docx') ||
+        decodedName.endsWith('.doc') ||
+        decodedName.endsWith('.pdf')) {
       cb(null, true);
     } else {
       cb(new Error('Only .docx, .doc and .pdf files are allowed'));
@@ -78,6 +80,23 @@ app.use((req, res, next) => {
   req.sessionId = req.headers['x-session-id'] || uuidv4();
   next();
 });
+
+/**
+ * Decode filename from latin1 to UTF-8
+ * Multer interprets filenames as latin1 by default, but browsers send UTF-8
+ * This causes Cyrillic filenames to be corrupted
+ * @param {string} filename - Original filename from multer
+ * @returns {string} - Properly decoded UTF-8 filename
+ */
+function decodeFilename(filename) {
+  if (!filename) return filename;
+  try {
+    // Convert latin1 string back to bytes, then decode as UTF-8
+    return Buffer.from(filename, 'latin1').toString('utf8');
+  } catch {
+    return filename;
+  }
+}
 
 /**
  * Check if LibreOffice is available
@@ -605,13 +624,14 @@ app.post('/api/convert', upload.single('file'), async (req, res) => {
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
-    console.log(`Processing file: ${req.file.originalname}`);
+    const decodedName = decodeFilename(req.file.originalname);
+    console.log(`Processing file: ${decodedName}`);
 
     // If already PDF, just return it
-    if (req.file.originalname.endsWith('.pdf')) {
+    if (decodedName.endsWith('.pdf')) {
       const pdfBuffer = await fs.readFile(req.file.path);
       res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `attachment; filename="${req.file.originalname}"`);
+      res.setHeader('Content-Disposition', `attachment; filename="${decodedName}"`);
       return res.send(pdfBuffer);
     }
 
@@ -624,7 +644,7 @@ app.post('/api/convert', upload.single('file'), async (req, res) => {
     await fs.unlink(pdfPath).catch(() => {});
 
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="${path.basename(req.file.originalname, '.docx')}.pdf"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${path.basename(decodedName, '.docx')}.pdf"`);
     res.send(pdfBuffer);
 
   } catch (error) {
@@ -655,10 +675,10 @@ app.post('/api/generate-journal', upload.fields([
   try {
     console.log('Generating journal PDF...');
     console.log('Files received:', {
-      coverPage: req.files.coverPage?.[0]?.originalname,
-      descriptionPage: req.files.descriptionPage?.[0]?.originalname,
-      articles: req.files.articles?.map(f => f.originalname),
-      finalPage: req.files.finalPage?.[0]?.originalname
+      coverPage: req.files.coverPage?.[0] ? decodeFilename(req.files.coverPage[0].originalname) : null,
+      descriptionPage: req.files.descriptionPage?.[0] ? decodeFilename(req.files.descriptionPage[0].originalname) : null,
+      articles: req.files.articles?.map(f => decodeFilename(f.originalname)),
+      finalPage: req.files.finalPage?.[0] ? decodeFilename(req.files.finalPage[0].originalname) : null
     });
 
     // Parse article metadata for TOC
@@ -679,8 +699,9 @@ app.post('/api/generate-journal', upload.fields([
     // 1. Process cover page
     if (req.files.coverPage?.[0]) {
       const file = req.files.coverPage[0];
-      console.log('Processing cover:', file.originalname);
-      if (file.originalname.endsWith('.pdf')) {
+      const decodedName = decodeFilename(file.originalname);
+      console.log('Processing cover:', decodedName);
+      if (decodedName.endsWith('.pdf')) {
         pdfPaths.push({ path: file.path, type: 'cover' });
       } else {
         const pdfPath = await convertDocxToPdf(file.path, sessionDir);
@@ -696,8 +717,9 @@ app.post('/api/generate-journal', upload.fields([
     // 2. Process description page
     if (req.files.descriptionPage?.[0]) {
       const file = req.files.descriptionPage[0];
-      console.log('Processing description:', file.originalname);
-      if (file.originalname.endsWith('.pdf')) {
+      const decodedName = decodeFilename(file.originalname);
+      console.log('Processing description:', decodedName);
+      if (decodedName.endsWith('.pdf')) {
         pdfPaths.push({ path: file.path, type: 'description' });
       } else {
         const pdfPath = await convertDocxToPdf(file.path, sessionDir);
@@ -718,10 +740,11 @@ app.post('/api/generate-journal', upload.fields([
 
     if (req.files.articles) {
       for (const file of req.files.articles) {
-        console.log(`Processing article: ${file.originalname}`);
+        const decodedName = decodeFilename(file.originalname);
+        console.log(`Processing article: ${decodedName}`);
 
         let pdfPath;
-        if (file.originalname.endsWith('.pdf')) {
+        if (decodedName.endsWith('.pdf')) {
           pdfPath = file.path;
         } else {
           pdfPath = await convertDocxToPdf(file.path, sessionDir);
@@ -732,9 +755,9 @@ app.post('/api/generate-journal', upload.fields([
         const articleDoc = await PDFDocument.load(articleBuffer);
         const articlePageCount = articleDoc.getPageCount();
 
-        // Find metadata for this article
-        const meta = articlesMetadata.find(m => m.fileName === file.originalname) || {
-          title: file.originalname.replace(/\.[^/.]+$/, ''),
+        // Find metadata for this article (match using decoded filename)
+        const meta = articlesMetadata.find(m => m.fileName === decodedName) || {
+          title: decodedName.replace(/\.[^/.]+$/, ''),
           author: 'Автор не указан',
           section: SECTION_ORDER[0]
         };
@@ -823,8 +846,9 @@ app.post('/api/generate-journal', upload.fields([
     let finalPdfPath = null;
     if (req.files.finalPage?.[0]) {
       const file = req.files.finalPage[0];
-      console.log('Processing final page:', file.originalname);
-      if (file.originalname.endsWith('.pdf')) {
+      const decodedName = decodeFilename(file.originalname);
+      console.log('Processing final page:', decodedName);
+      if (decodedName.endsWith('.pdf')) {
         finalPdfPath = file.path;
       } else {
         finalPdfPath = await convertDocxToPdf(file.path, sessionDir);
