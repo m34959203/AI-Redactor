@@ -13,7 +13,8 @@ import InfoTab from './components/Info/InfoTab';
 import { useApp, useNotifications, useProcessing } from './context/AppContext';
 import { extractMetadataWithAI, checkSpelling, reviewArticle, detectArticleSection, ARTICLE_SECTIONS } from './services/aiApi';
 import { validatePageFile, validateArticleFile } from './utils/fileValidation';
-import { detectLanguage, sortArticlesBySectionAndLanguage } from './utils/languageDetection';
+import { detectLanguage, sortArticlesBySectionAndLanguage, NEEDS_REVIEW_SECTION } from './utils/languageDetection';
+import { CONFIDENCE_THRESHOLDS } from './constants/sections';
 import { validatePdfRequirements, createIssue, generatePDF, generatePDFSmart, downloadPDF } from './utils/pdfGenerator';
 import { convertDocxToText } from './utils/docxConverter';
 import { addToArchive, getPdfBlob, removeFromArchive } from './utils/archiveStorage';
@@ -128,7 +129,7 @@ const App = () => {
         currentStep++;
 
         setProcessing(true, `[${fileNum}/${totalFiles}] Определение раздела: ${file.name}`, currentStep, totalSteps);
-        const section = await detectArticleSection(content, metadata.title);
+        const sectionResult = await detectArticleSection(content, metadata.title);
         currentStep++;
 
         const article = {
@@ -137,7 +138,10 @@ const App = () => {
           title: metadata.title,
           author: metadata.author,
           language,
-          section,
+          section: sectionResult.section,
+          sectionConfidence: sectionResult.confidence,
+          needsReview: sectionResult.needsReview,
+          sectionReasoning: sectionResult.reasoning,
           content,
         };
 
@@ -169,6 +173,12 @@ const App = () => {
     const updates = { [field]: value };
     if (field === 'author') {
       updates.language = detectLanguage(value);
+    }
+    // When section is manually changed, mark as manually reviewed
+    if (field === 'section') {
+      updates.needsReview = false;
+      updates.sectionConfidence = 1.0; // Manual selection = 100% confidence
+      updates.manuallyClassified = true;
     }
     actions.updateArticle(id, updates);
 

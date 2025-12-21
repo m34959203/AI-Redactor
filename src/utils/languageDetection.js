@@ -3,6 +3,12 @@
  * Supports Russian, English, and Kazakh languages
  */
 
+import {
+  SECTION_ORDER as CENTRALIZED_SECTION_ORDER,
+  getSectionPriority,
+  NEEDS_REVIEW_SECTION
+} from '../constants/sections';
+
 // Kazakh-specific Cyrillic letters (not present in Russian)
 const KAZAKH_SPECIFIC = /[ӘәҒғҚқҢңӨөҰұҮүҺһІі]/;
 
@@ -85,23 +91,12 @@ const getLanguagePriority = (code) => {
 };
 
 /**
- * Section order for journal
+ * Section order for journal (re-exported from centralized constants)
  */
-export const SECTION_ORDER = [
-  'ТЕХНИЧЕСКИЕ НАУКИ',
-  'ПЕДАГОГИЧЕСКИЕ НАУКИ',
-  'ЕСТЕСТВЕННЫЕ И ЭКОНОМИЧЕСКИЕ НАУКИ'
-];
+export const SECTION_ORDER = CENTRALIZED_SECTION_ORDER;
 
-/**
- * Gets section priority for sorting
- * @param {string} section - Section name
- * @returns {number} - Sort priority
- */
-const getSectionPriority = (section) => {
-  const index = SECTION_ORDER.indexOf(section);
-  return index >= 0 ? index : SECTION_ORDER.length;
-};
+// Re-export NEEDS_REVIEW_SECTION for components that need it
+export { NEEDS_REVIEW_SECTION };
 
 /**
  * Sorts articles by language and then by author name
@@ -135,6 +130,7 @@ export const sortArticlesByLanguage = (articles) => {
  * Sorts articles by section first, then by language, then by author name
  * Section Order: ТЕХНИЧЕСКИЕ НАУКИ → ПЕДАГОГИЧЕСКИЕ НАУКИ → ЕСТЕСТВЕННЫЕ И ЭКОНОМИЧЕСКИЕ НАУКИ
  * Language Order within section: Latin (A-Z) → Cyrillic (А-Я) → Kazakh (А-Я)
+ * Articles with NEEDS_REVIEW_SECTION are placed at the end
  *
  * @param {Array<{author: string, language: LanguageCode, section: string}>} articles - Array of articles
  * @returns {Array} - Sorted articles
@@ -143,7 +139,14 @@ export const sortArticlesBySectionAndLanguage = (articles) => {
   if (!Array.isArray(articles)) return [];
 
   return [...articles].sort((a, b) => {
-    // First, sort by section priority
+    // Articles needing review go to the end
+    const aIsReview = a.section === NEEDS_REVIEW_SECTION;
+    const bIsReview = b.section === NEEDS_REVIEW_SECTION;
+
+    if (aIsReview && !bIsReview) return 1;
+    if (!aIsReview && bIsReview) return -1;
+
+    // First, sort by section priority (using centralized function)
     const sectionPriorityA = getSectionPriority(a.section);
     const sectionPriorityB = getSectionPriority(b.section);
 
@@ -185,6 +188,12 @@ export const groupArticlesBySection = (articles) => {
       groups[section] = sectionArticles;
     }
   });
+
+  // Add articles that need review at the end
+  const needsReviewArticles = articles.filter(a => a.section === NEEDS_REVIEW_SECTION);
+  if (needsReviewArticles.length > 0) {
+    groups[NEEDS_REVIEW_SECTION] = needsReviewArticles;
+  }
 
   return groups;
 };
