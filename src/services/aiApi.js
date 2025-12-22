@@ -13,7 +13,7 @@ import {
 
 const API_URL = "https://openrouter.ai/api/v1/chat/completions";
 const MODEL = "tngtech/deepseek-r1t2-chimera:free";
-const FALLBACK_MODEL = "deepseek/deepseek-r1:free"; // Updated to working model
+const FALLBACK_MODEL = "meta-llama/llama-3.1-8b-instruct:free"; // Updated to working free model
 
 // System prompt for consistent AI behavior
 const SYSTEM_PROMPT = `Ты - эксперт-классификатор научных публикаций для академического журнала.
@@ -168,6 +168,57 @@ const makeAIRequest = async (prompt, maxTokens = 1000, useFallback = false) => {
 };
 
 /**
+ * Attempts to repair truncated JSON by closing open structures
+ */
+const repairTruncatedJson = (jsonStr) => {
+  let str = jsonStr.trim();
+
+  // Count unclosed structures
+  let openBraces = 0;
+  let openBrackets = 0;
+  let inString = false;
+  let escapeNext = false;
+
+  for (let i = 0; i < str.length; i++) {
+    const char = str[i];
+
+    if (escapeNext) {
+      escapeNext = false;
+      continue;
+    }
+
+    if (char === '\\') {
+      escapeNext = true;
+      continue;
+    }
+
+    if (char === '"' && !escapeNext) {
+      inString = !inString;
+      continue;
+    }
+
+    if (!inString) {
+      if (char === '{') openBraces++;
+      if (char === '}') openBraces--;
+      if (char === '[') openBrackets++;
+      if (char === ']') openBrackets--;
+    }
+  }
+
+  // If we're in a string, try to close it
+  if (inString) {
+    // Find last quote and truncate there or add closing quote
+    str = str + '"';
+  }
+
+  // Close any open brackets and braces
+  str = str + ']'.repeat(Math.max(0, openBrackets));
+  str = str + '}'.repeat(Math.max(0, openBraces));
+
+  return str;
+};
+
+/**
  * Safely parses JSON with fallback values
  */
 const safeJsonParse = (jsonString, fallback = {}) => {
@@ -175,8 +226,15 @@ const safeJsonParse = (jsonString, fallback = {}) => {
     const cleaned = extractJsonFromResponse(jsonString);
     return JSON.parse(cleaned);
   } catch (error) {
-    console.error('JSON parse error:', error, 'Raw:', jsonString?.substring(0, 500));
-    return fallback;
+    // Try to repair truncated JSON
+    try {
+      const repaired = repairTruncatedJson(extractJsonFromResponse(jsonString));
+      console.warn('Attempting to repair truncated JSON...');
+      return JSON.parse(repaired);
+    } catch (repairError) {
+      console.error('JSON parse error:', error, 'Raw:', jsonString?.substring(0, 500));
+      return fallback;
+    }
   }
 };
 
