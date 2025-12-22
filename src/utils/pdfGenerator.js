@@ -442,15 +442,17 @@ const renderHtmlAsImage = async (doc, html, startY, startPage) => {
     padding: 0;
     margin: 0;
     background: white;
-    font-family: 'Times New Roman', Times, serif;
+    font-family: 'PT Serif', 'Times New Roman', 'Liberation Serif', 'Noto Serif', Times, serif;
     font-size: 12pt;
     line-height: 1.5;
     color: black;
   `;
 
-  // Add styles for proper rendering
+  // Add styles for proper rendering with @font-face for Times New Roman alternative
   const styleElement = document.createElement('style');
   styleElement.textContent = `
+    @import url('https://fonts.googleapis.com/css2?family=PT+Serif:ital,wght@0,400;0,700;1,400;1,700&display=swap');
+
     .docx-content * {
       max-width: 100%;
       box-sizing: border-box;
@@ -560,6 +562,13 @@ const renderHtmlAsImage = async (doc, html, startY, startPage) => {
       });
     }));
 
+    // Wait for fonts to load (PT Serif from Google Fonts)
+    if (document.fonts && document.fonts.ready) {
+      await document.fonts.ready;
+    }
+    // Additional small delay to ensure fonts are applied
+    await new Promise(resolve => setTimeout(resolve, 100));
+
     // Render to canvas
     const canvas = await html2canvas(container, {
       scale: 2, // Higher quality
@@ -577,24 +586,32 @@ const renderHtmlAsImage = async (doc, html, startY, startPage) => {
 
     // Line height in pixels (12pt * 1.5 line-height * scale 2 = ~36px)
     const lineHeightPx = 36;
-    // Convert to mm for PDF
-    const lineHeightMm = (lineHeightPx * imgWidth) / canvas.width;
+    // Convert to mm for PDF - correct formula: proportional to height ratio
+    const lineHeightMm = (lineHeightPx / canvas.height) * imgHeight;
 
     // Split into pages if content is too tall
     let remainingHeight = imgHeight;
     let sourceY = 0;
 
+    // Minimum content height to draw (at least 3 lines)
+    const minContentHeight = lineHeightMm * 3;
+
     while (remainingHeight > 0) {
-      // Check if we need a new page
-      if (currentY > MARGIN_TOP && currentY + Math.min(remainingHeight, 50) > PAGE_HEIGHT - MARGIN_BOTTOM) {
+      // Calculate available space on current page
+      const availableHeight = PAGE_HEIGHT - MARGIN_BOTTOM - currentY;
+
+      // Check if we need a new page - start new page if:
+      // 1. Not at top of page AND
+      // 2. Available space is less than minimum content height
+      if (currentY > MARGIN_TOP && availableHeight < minContentHeight) {
         addPageNumber(doc, currentPage);
         doc.addPage();
         currentPage++;
         currentY = MARGIN_TOP;
       }
 
-      const availableHeight = PAGE_HEIGHT - MARGIN_BOTTOM - currentY;
-      let heightToDraw = Math.min(remainingHeight, availableHeight);
+      const availableHeightAfterCheck = PAGE_HEIGHT - MARGIN_BOTTOM - currentY;
+      let heightToDraw = Math.min(remainingHeight, availableHeightAfterCheck);
 
       // Round down to complete lines to avoid cutting text mid-line
       if (remainingHeight > heightToDraw && lineHeightMm > 0) {
@@ -604,8 +621,8 @@ const renderHtmlAsImage = async (doc, html, startY, startPage) => {
         }
       }
 
-      // Calculate source rectangle from canvas
-      const sourceHeight = (heightToDraw / imgWidth) * canvas.width;
+      // Calculate source rectangle from canvas - correct formula using height ratio
+      const sourceHeight = (heightToDraw / imgHeight) * canvas.height;
 
       // Create a temporary canvas for this portion
       const tempCanvas = document.createElement('canvas');
@@ -950,8 +967,9 @@ export const generatePDF = async (issue, articles, coverPage, descriptionPage, f
           message: `Обработка статьи ${globalArticleIndex + 1}/${articles.length}: ${article.title.substring(0, 30)}...`
         });
 
-        // Start new page for each article (except first in section if it fits)
-        if (!isFirstInSection) {
+        // Start new page for each article (except first in section which continues on section page)
+        const isFirst = isFirstInSection;
+        if (!isFirst) {
           doc.addPage();
           currentPage++;
         }
@@ -963,7 +981,8 @@ export const generatePDF = async (issue, articles, coverPage, descriptionPage, f
         }
 
         // Add 4 empty lines before article
-        let articleY = isFirstInSection ? startY : MARGIN_TOP;
+        // First article starts after section header, others start at top margin
+        let articleY = isFirst ? startY : MARGIN_TOP;
         articleY = addEmptyLinesBeforeArticle(doc, articleY);
 
         const fontName = getFontName();

@@ -1,19 +1,33 @@
 /**
  * Cyrillic font loader for jsPDF
- * Loads PT Serif font (Times New Roman-like) for academic journals
+ * Uses PT Serif (Times New Roman-like, supports Cyrillic) for academic journals
+ * PT Serif has metrics similar to Times New Roman and full Cyrillic support
  */
 
-// Font URLs from Google Fonts repository (PT Serif - Times-like, supports Cyrillic)
+// Primary: PT Serif from Google Fonts repository (Times-like, supports Cyrillic)
 const FONT_URLS = {
-  regular: 'https://raw.githubusercontent.com/google/fonts/main/ofl/ptserif/PT_Serif-Web-Regular.ttf',
-  bold: 'https://raw.githubusercontent.com/google/fonts/main/ofl/ptserif/PT_Serif-Web-Bold.ttf',
-  italic: 'https://raw.githubusercontent.com/google/fonts/main/ofl/ptserif/PT_Serif-Web-Italic.ttf',
+  regular: 'https://raw.githubusercontent.com/ArtifexSoftware/mupdf/master/resources/fonts/noto/NotoSerif-Regular.ttf',
+  bold: 'https://raw.githubusercontent.com/ArtifexSoftware/mupdf/master/resources/fonts/noto/NotoSerif-Bold.ttf',
+  italic: 'https://raw.githubusercontent.com/ArtifexSoftware/mupdf/master/resources/fonts/noto/NotoSerif-Italic.ttf',
 };
 
-// Fallback to PT Sans if PT Serif not available
+// Fallback to Noto Serif if primary not available
 const FALLBACK_URLS = {
-  regular: 'https://raw.githubusercontent.com/google/fonts/main/ofl/ptsans/PT_Sans-Web-Regular.ttf',
-  bold: 'https://raw.githubusercontent.com/google/fonts/main/ofl/ptsans/PT_Sans-Web-Bold.ttf',
+  regular: 'https://raw.githubusercontent.com/ArtifexSoftware/mupdf/master/resources/fonts/droid/DroidSerif-Regular.ttf',
+  bold: 'https://raw.githubusercontent.com/ArtifexSoftware/mupdf/master/resources/fonts/droid/DroidSerif-Bold.ttf',
+  italic: 'https://raw.githubusercontent.com/ArtifexSoftware/mupdf/master/resources/fonts/droid/DroidSerif-Italic.ttf',
+};
+
+// Load PT Serif web font for html2canvas rendering
+export const loadWebFont = () => {
+  // Add Google Fonts link for PT Serif
+  if (!document.getElementById('pt-serif-font')) {
+    const link = document.createElement('link');
+    link.id = 'pt-serif-font';
+    link.rel = 'stylesheet';
+    link.href = 'https://fonts.googleapis.com/css2?family=PT+Serif:ital,wght@0,400;0,700;1,400;1,700&display=swap';
+    document.head.appendChild(link);
+  }
 };
 
 // Cache for loaded fonts
@@ -60,24 +74,28 @@ const loadFontFromUrl = async (url) => {
 export const preloadFonts = async () => {
   if (fontsLoaded) return true;
 
+  // Load web font for html2canvas rendering (PT Serif - Times New Roman alternative)
+  loadWebFont();
+
   try {
-    // Try PT Serif first (Times-like)
+    // Try Noto Serif first (supports Cyrillic well)
     let [regular, bold, italic] = await Promise.all([
       loadFontFromUrl(FONT_URLS.regular),
       loadFontFromUrl(FONT_URLS.bold),
       loadFontFromUrl(FONT_URLS.italic),
     ]);
 
-    // Fallback to PT Sans if PT Serif failed
+    // Fallback to Droid Serif if Noto Serif failed
     if (!regular) {
-      console.warn('PT Serif not available, trying PT Sans fallback...');
-      [regular, bold] = await Promise.all([
+      console.warn('Noto Serif not available, trying Droid Serif fallback...');
+      [regular, bold, italic] = await Promise.all([
         loadFontFromUrl(FALLBACK_URLS.regular),
         loadFontFromUrl(FALLBACK_URLS.bold),
+        loadFontFromUrl(FALLBACK_URLS.italic),
       ]);
-      fontName = 'PTSans';
+      fontName = 'DroidSerif';
     } else {
-      fontName = 'PTSerif';
+      fontName = 'NotoSerif';
     }
 
     fontData.regular = regular;
