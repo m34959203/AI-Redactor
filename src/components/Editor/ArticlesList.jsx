@@ -1,9 +1,9 @@
 import React from 'react';
-import { Edit2, Trash2, Check, Download, BookOpen, AlertTriangle, Bot, User, Sparkles } from 'lucide-react';
+import { Edit2, Trash2, Check, Download, BookOpen, AlertTriangle, User, Sparkles } from 'lucide-react';
 import Alert from '../UI/Alert';
 import { ARTICLE_SECTIONS } from '../../services/aiApi';
 import { groupArticlesBySection, SECTION_ORDER, NEEDS_REVIEW_SECTION } from '../../utils/languageDetection';
-import { getConfidenceLevel, CONFIDENCE_THRESHOLDS } from '../../constants/sections';
+import { CONFIDENCE_THRESHOLDS } from '../../constants/sections';
 
 /**
  * Confidence indicator component
@@ -33,23 +33,8 @@ const ConfidenceIndicator = ({ confidence, needsReview, manuallyClassified, reas
     );
   }
 
-  const { level, color, label } = getConfidenceLevel(confidence);
-  const colorClasses = {
-    green: 'bg-green-100 text-green-700',
-    yellow: 'bg-yellow-100 text-yellow-700',
-    orange: 'bg-orange-100 text-orange-700',
-    red: 'bg-red-100 text-red-700'
-  };
-
-  return (
-    <span
-      className={`inline-flex items-center gap-1 px-2 py-1 rounded text-xs ${colorClasses[color]}`}
-      title={reasoning || `${label} (${Math.round(confidence * 100)}%)`}
-    >
-      <Bot size={12} />
-      AI: {Math.round(confidence * 100)}%
-    </span>
-  );
+  // AI confidence percentage removed - only show manual selection and needs review indicators
+  return null;
 };
 
 const ArticleItem = ({ article, index, globalIndex, isEditing, onEdit, onUpdate, onDelete, onStopEditing }) => {
