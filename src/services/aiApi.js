@@ -634,3 +634,214 @@ export const detectArticleSectionSimple = async (content, title) => {
   const result = await detectArticleSection(content, title);
   return result.section;
 };
+
+/**
+ * Sleep function for exponential backoff
+ * @param {number} ms - Milliseconds to sleep
+ */
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+/**
+ * Retry article classification with improved prompt and exponential backoff
+ * This function is specifically designed for articles that failed initial classification
+ *
+ * @param {string} content - Article content
+ * @param {string} title - Article title
+ * @param {number} maxRetries - Maximum number of retry attempts (default: 3)
+ * @returns {Promise<{section: string, confidence: number, needsReview: boolean, reasoning?: string}>}
+ */
+export const retryArticleClassification = async (content, title, maxRetries = 3) => {
+  const sectionDescriptions = generateSectionDescriptions();
+
+  // Enhanced prompt with more context and examples for better classification
+  const enhancedPrompt = `Ты - ГЛАВНЫЙ ЭКСПЕРТ по классификации научных публикаций с 20-летним опытом.
+КРИТИЧЕСКИ ВАЖНО: Ты ОБЯЗАН выбрать ОДИН из разделов ниже. НЕДОПУСТИМО возвращать пустой раздел или отказываться от классификации.
+
+## ДОСТУПНЫЕ РАЗДЕЛЫ (ВЫБЕРИ СТРОГО ОДИН):
+
+${sectionDescriptions}
+
+## АЛГОРИТМ КЛАССИФИКАЦИИ (строго следуй):
+
+ШАГ 1: Прочитай название статьи
+ШАГ 2: Найди КЛЮЧЕВЫЕ ТЕРМИНЫ в тексте
+ШАГ 3: Определи МЕТОДОЛОГИЮ исследования
+ШАГ 4: Определи ОБЪЕКТ исследования
+ШАГ 5: Выбери НАИБОЛЕЕ ПОДХОДЯЩИЙ раздел
+
+## ПРАВИЛА ПРИНЯТИЯ РЕШЕНИЯ:
+
+1. **ТЕХНИЧЕСКИЕ НАУКИ** выбирай, если статья про:
+   - Программирование, IT, компьютерные системы
+   - Инженерию, строительство, машиностроение
+   - Автоматизацию, роботизацию
+   - Энергетику, электротехнику
+   - Разработку технологий и систем
+
+2. **ПЕДАГОГИЧЕСКИЕ НАУКИ** выбирай, если статья про:
+   - Методику преподавания ЛЮБОГО предмета
+   - Образовательные технологии
+   - Педагогические подходы
+   - Обучение, воспитание, развитие
+   - Дидактику, компетенции
+
+3. **ЕСТЕСТВЕННЫЕ И ЭКОНОМИЧЕСКИЕ НАУКИ** выбирай, если статья про:
+   - Биологию, химию, физику, экологию
+   - Экономику, финансы, бизнес
+   - Медицину, здравоохранение
+   - Географию, геологию
+   - Сельское хозяйство
+
+## ПРИМЕРЫ КЛАССИФИКАЦИИ:
+
+Пример 1: "Разработка мобильного приложения для мониторинга здоровья"
+→ ТЕХНИЧЕСКИЕ НАУКИ (разработка приложения = IT/программирование)
+
+Пример 2: "Методика преподавания программирования в школах"
+→ ПЕДАГОГИЧЕСКИЕ НАУКИ (методика преподавания = педагогика)
+
+Пример 3: "Влияние удобрений на урожайность пшеницы"
+→ ЕСТЕСТВЕННЫЕ И ЭКОНОМИЧЕСКИЕ НАУКИ (сельское хозяйство + экология)
+
+## ВХОДНЫЕ ДАННЫЕ ДЛЯ КЛАССИФИКАЦИИ:
+
+**Название:** "${title}"
+
+**Текст статьи:**
+${content.substring(0, 3500)}
+
+## ОБЯЗАТЕЛЬНЫЙ ФОРМАТ ОТВЕТА (JSON):
+{
+  "section": "ТОЧНОЕ_НАЗВАНИЕ_РАЗДЕЛА_ИЗ_СПИСКА_ВЫШЕ",
+  "confidence": 0.75,
+  "reasoning": "Объяснение в 1-2 предложениях"
+}
+
+ВАЖНО: Поле "section" ДОЛЖНО содержать ТОЧНОЕ название одного из трёх разделов выше!`;
+
+  let lastError = null;
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    // Exponential backoff: 1s, 2s, 4s
+    if (attempt > 0) {
+      const backoffTime = Math.pow(2, attempt - 1) * 1000;
+      console.log(`Retry attempt ${attempt + 1}/${maxRetries} after ${backoffTime}ms backoff...`);
+      await sleep(backoffTime);
+    }
+
+    try {
+      // Use different fallback model for each retry attempt
+      const fallbackIndex = attempt === 0 ? -1 : Math.min(attempt - 1, FALLBACK_MODELS.length - 1);
+      const response = await makeAIRequest(enhancedPrompt, 600, fallbackIndex);
+      const result = safeJsonParse(response, null);
+
+      if (!result || !result.section) {
+        console.warn(`Attempt ${attempt + 1}: Invalid AI response structure`);
+        lastError = new Error('Invalid response structure');
+        continue;
+      }
+
+      // Validate and normalize section
+      const detectedSection = result.section?.toUpperCase?.()?.trim() || '';
+
+      // Find matching section with fuzzy matching
+      const matchedSection = ARTICLE_SECTIONS.find(s => {
+        const normalizedSection = s.toUpperCase().replace(/\s+/g, ' ').trim();
+        const normalizedDetected = detectedSection.replace(/\s+/g, ' ').trim();
+        return normalizedSection === normalizedDetected ||
+               normalizedSection.includes(normalizedDetected) ||
+               normalizedDetected.includes(normalizedSection) ||
+               // Partial match for common variations
+               (normalizedDetected.includes('ТЕХНИЧ') && s.includes('ТЕХНИЧЕСКИЕ')) ||
+               (normalizedDetected.includes('ПЕДАГОГ') && s.includes('ПЕДАГОГИЧЕСКИЕ')) ||
+               (normalizedDetected.includes('ЕСТЕСТВ') && s.includes('ЕСТЕСТВЕННЫЕ'));
+      });
+
+      if (matchedSection) {
+        // Normalize confidence
+        const confidence = Math.max(0, Math.min(1, Number(result.confidence) || 0.6));
+
+        console.log(`Classification successful on attempt ${attempt + 1}: ${matchedSection} (${(confidence * 100).toFixed(0)}%)`);
+
+        return {
+          section: matchedSection,
+          confidence: confidence,
+          needsReview: confidence < CONFIDENCE_THRESHOLDS.LOW,
+          reasoning: result.reasoning || 'Автоматическая классификация (повторная попытка)'
+        };
+      }
+
+      lastError = new Error(`Unknown section: ${result.section}`);
+      console.warn(`Attempt ${attempt + 1}: Section "${result.section}" not matched to known sections`);
+    } catch (error) {
+      lastError = error;
+      console.error(`Attempt ${attempt + 1} failed:`, error.message);
+
+      // Don't retry on auth errors
+      if (error.message === "API_KEY_MISSING" || error.message === "API_KEY_INVALID") {
+        break;
+      }
+    }
+  }
+
+  console.error(`All ${maxRetries} retry attempts failed. Last error:`, lastError?.message);
+
+  return {
+    section: NEEDS_REVIEW_SECTION,
+    confidence: 0,
+    needsReview: true,
+    reasoning: `Не удалось классифицировать после ${maxRetries} попыток: ${lastError?.message || 'неизвестная ошибка'}`
+  };
+};
+
+/**
+ * Batch retry classification for multiple articles
+ *
+ * @param {Array} articles - Array of articles to retry classification
+ * @param {Function} onProgress - Progress callback (current, total, article)
+ * @returns {Promise<Array>} - Array of updated articles with new classification results
+ */
+export const batchRetryClassification = async (articles, onProgress) => {
+  const results = [];
+
+  for (let i = 0; i < articles.length; i++) {
+    const article = articles[i];
+
+    if (onProgress) {
+      onProgress(i + 1, articles.length, article);
+    }
+
+    try {
+      const classification = await retryArticleClassification(
+        article.content,
+        article.title,
+        3 // 3 retry attempts per article
+      );
+
+      results.push({
+        ...article,
+        section: classification.section,
+        sectionConfidence: classification.confidence,
+        needsReview: classification.needsReview,
+        sectionReasoning: classification.reasoning,
+        retryAttempted: true,
+        retryTimestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error(`Failed to retry classification for article "${article.title}":`, error);
+      results.push({
+        ...article,
+        retryAttempted: true,
+        retryFailed: true,
+        retryTimestamp: new Date().toISOString()
+      });
+    }
+
+    // Small delay between articles to avoid rate limiting
+    if (i < articles.length - 1) {
+      await sleep(500);
+    }
+  }
+
+  return results;
+};
