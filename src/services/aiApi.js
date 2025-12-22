@@ -12,12 +12,12 @@ import {
 } from '../constants/sections';
 
 const API_URL = "https://openrouter.ai/api/v1/chat/completions";
-const MODEL = "tngtech/deepseek-r1t2-chimera:free";
-// Fallback models in order of preference (updated to currently available free models)
+const MODEL = "google/gemma-3-27b-it:free";
+// Fallback models in order of preference (updated December 2025)
 const FALLBACK_MODELS = [
-  "google/gemma-2-9b-it:free",
-  "meta-llama/llama-3.2-3b-instruct:free",
-  "mistralai/mistral-7b-instruct:free"
+  "deepseek/deepseek-chat-v3-0324:free",  // 131K context, 685B MoE, excellent reasoning
+  "meta-llama/llama-3.3-70b-instruct:free", // 128K context, strong classification
+  "google/gemma-3-12b-it:free"              // 128K context, lighter fallback
 ];
 
 // System prompt for consistent AI behavior
