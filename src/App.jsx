@@ -4,6 +4,7 @@ import Tabs from './components/UI/Tabs';
 import LoadingOverlay from './components/UI/LoadingOverlay';
 import ToastContainer from './components/UI/Toast';
 import Onboarding from './components/UI/Onboarding';
+import ConfirmDialog from './components/UI/ConfirmDialog';
 import EditorTab from './components/Editor/EditorTab';
 import SpellCheckTab from './components/SpellCheck/SpellCheckTab';
 import ReviewTab from './components/Review/ReviewTab';
@@ -13,6 +14,7 @@ import InfoTab from './components/Info/InfoTab';
 import { useApp, useNotifications, useProcessing } from './context/AppContext';
 import { extractMetadataWithAI, checkSpelling, reviewArticle, detectArticleSection, ARTICLE_SECTIONS, retryArticleClassification, batchRetryClassification } from './services/aiApi';
 import { validatePageFile, validateArticleFile } from './utils/fileValidation';
+import useTheme from './hooks/useTheme';
 import { detectLanguage, sortArticlesBySectionAndLanguage, NEEDS_REVIEW_SECTION } from './utils/languageDetection';
 import { CONFIDENCE_THRESHOLDS } from './constants/sections';
 import { validatePdfRequirements, createIssue, generatePDF, generatePDFSmart, downloadPDF } from './utils/pdfGenerator';
@@ -24,6 +26,7 @@ const App = () => {
   const { state, actions } = useApp();
   const { notifications, showSuccess, showError, removeNotification } = useNotifications();
   const { isProcessing, processingMessage, progressCurrent, progressTotal, setProcessing } = useProcessing();
+  const { isDark, toggleTheme } = useTheme();
 
   const {
     articles,
@@ -46,6 +49,24 @@ const App = () => {
 
   // Local state for retry functionality
   const [retryingArticleId, setRetryingArticleId] = useState(null);
+
+  // Confirm dialog state
+  const [confirmDialog, setConfirmDialog] = useState({
+    isOpen: false,
+    title: '',
+    message: '',
+    confirmText: 'Удалить',
+    variant: 'danger',
+    onConfirm: () => {},
+  });
+
+  const showConfirm = ({ title, message, confirmText = 'Удалить', variant = 'danger', onConfirm }) => {
+    setConfirmDialog({ isOpen: true, title, message, confirmText, variant, onConfirm });
+  };
+
+  const hideConfirm = () => {
+    setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+  };
 
   // Special page upload handlers
   const handleSpecialPageUpload = async (file, type) => {
@@ -315,8 +336,17 @@ const App = () => {
   };
 
   const deleteArticle = (id) => {
-    actions.deleteArticle(id);
-    showSuccess('Статья удалена');
+    const article = articles.find(a => a.id === id);
+    showConfirm({
+      title: 'Удаление статьи',
+      message: `Вы уверены, что хотите удалить статью "${article?.title || 'Без названия'}"? Это действие нельзя отменить.`,
+      confirmText: 'Удалить',
+      variant: 'danger',
+      onConfirm: () => {
+        actions.deleteArticle(id);
+        showSuccess('Статья удалена');
+      }
+    });
   };
 
   // PDF Generation
@@ -406,14 +436,23 @@ const App = () => {
   };
 
   const handleDeleteFromArchive = async (issueId) => {
-    try {
-      await removeFromArchive(issueId);
-      actions.removeFromArchive(issueId);
-      showSuccess('Выпуск удалён из архива');
-    } catch (error) {
-      console.error('Error deleting from archive:', error);
-      showError('Ошибка при удалении из архива');
-    }
+    const issue = archive.find(i => i.id === issueId);
+    showConfirm({
+      title: 'Удаление выпуска',
+      message: `Вы уверены, что хотите удалить выпуск "${issue?.name || 'Без названия'}" из архива? PDF файл будет удалён безвозвратно.`,
+      confirmText: 'Удалить',
+      variant: 'danger',
+      onConfirm: async () => {
+        try {
+          await removeFromArchive(issueId);
+          actions.removeFromArchive(issueId);
+          showSuccess('Выпуск удалён из архива');
+        } catch (error) {
+          console.error('Error deleting from archive:', error);
+          showError('Ошибка при удалении из архива');
+        }
+      }
+    });
   };
 
   // Review handler
@@ -557,9 +596,9 @@ const App = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-gray-800 transition-colors">
       <div className="container mx-auto p-6 max-w-7xl">
-        <Header articlesCount={articles.length} />
+        <Header articlesCount={articles.length} isDark={isDark} onThemeToggle={toggleTheme} />
         <Tabs activeTab={activeTab} setActiveTab={actions.setActiveTab} />
 
         {activeTab === 'editor' && (
@@ -635,6 +674,17 @@ const App = () => {
       {!hasSeenOnboarding && (
         <Onboarding onComplete={handleOnboardingComplete} />
       )}
+
+      {/* Confirm Dialog */}
+      <ConfirmDialog
+        isOpen={confirmDialog.isOpen}
+        onClose={hideConfirm}
+        onConfirm={confirmDialog.onConfirm}
+        title={confirmDialog.title}
+        message={confirmDialog.message}
+        confirmText={confirmDialog.confirmText}
+        variant={confirmDialog.variant}
+      />
     </div>
   );
 };

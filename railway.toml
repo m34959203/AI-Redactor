@@ -1,10 +1,14 @@
 [build]
 builder = "dockerfile"
-dockerfilePath = "Dockerfile"
+dockerfilePath = "Dockerfile.production"
 # Railway automatically passes env vars as build args
+# Required: DATABASE_URL, OPENROUTER_API_KEY
 
 [deploy]
 healthcheckPath = "/api/health"
 healthcheckTimeout = 30
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3
+
+# Recommended: Add PostgreSQL plugin in Railway dashboard
+# It will automatically set DATABASE_URL environment variable

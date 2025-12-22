@@ -61,7 +61,13 @@ const LoadingOverlay = ({ message = 'Обработка...', current, total }) =
   const fileCounts = getFileCounts(message);
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div
+      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+      role="dialog"
+      aria-modal="true"
+      aria-busy="true"
+      aria-label="Загрузка"
+    >
       <div className="bg-white rounded-2xl p-8 text-center min-w-[360px] max-w-md">
         {/* Progress indicator */}
         {hasProgress ? (
@@ -107,7 +113,14 @@ const LoadingOverlay = ({ message = 'Обработка...', current, total }) =
             </div>
 
             {/* Progress bar - shows overall step progress */}
-            <div className="w-full bg-gray-200 rounded-full h-2.5 overflow-hidden mb-2">
+            <div
+              className="w-full bg-gray-200 rounded-full h-2.5 overflow-hidden mb-2"
+              role="progressbar"
+              aria-valuenow={progressPercent}
+              aria-valuemin="0"
+              aria-valuemax="100"
+              aria-label={`Прогресс: ${progressPercent}%`}
+            >
               <div
                 className="bg-gradient-to-r from-indigo-500 to-purple-600 h-2.5 rounded-full transition-all duration-300"
                 style={{ width: `${progressPercent}%` }}

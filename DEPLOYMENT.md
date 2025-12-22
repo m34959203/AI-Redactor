@@ -1,284 +1,292 @@
-# 🚀 Руководство по деплою
+# AI-Redactor Deployment Guide
 
-Это руководство поможет вам задеплоить AI-Редактор научного журнала на различные платформы.
+Это руководство описывает развёртывание AI-Redactor на различных платформах.
 
-## Vercel (Рекомендуется)
+## Требования
 
-Vercel - лучший вариант для деплоя Vite/React приложений.
+- **PostgreSQL 14+** - база данных (опционально, без БД работает в режиме памяти)
+- **Node.js 20+** - для сервера
+- **LibreOffice** - для конвертации DOCX → PDF
+- **OpenRouter API Key** - для AI-функций (бесплатно на [openrouter.ai](https://openrouter.ai))
 
-### Способ 1: Через Vercel CLI
+## Переменные окружения
 
-1. **Установите Vercel CLI**
+| Переменная | Обязательная | Описание |
+|------------|--------------|----------|
+| `DATABASE_URL` | Нет* | PostgreSQL connection string |
+| `OPENROUTER_API_KEY` | Да | Ключ API OpenRouter |
+| `PORT` | Нет | Порт сервера (по умолчанию 3001) |
+| `NODE_ENV` | Нет | Окружение (production/development) |
+| `DB_SSL` | Нет | SSL для БД (true/false) |
+
+*Без DATABASE_URL приложение работает, но данные не сохраняются между сессиями.
+
+---
+
+## Railway (Рекомендуется)
+
+Railway автоматически настраивает PostgreSQL и переменные окружения.
+
+### Быстрый деплой
+
+1. Создайте проект на [Railway](https://railway.app)
+2. Подключите GitHub репозиторий
+3. Добавьте PostgreSQL plugin (в dashboard)
+4. Установите переменные окружения:
+   - `OPENROUTER_API_KEY` - ваш ключ
+5. Railway автоматически:
+   - Запустит build по `railway.toml`
+   - Создаст `DATABASE_URL`
+   - Запустит миграции при старте
+
+### CLI деплой
+
 ```bash
-npm i -g vercel
+# Установите Railway CLI
+npm install -g @railway/cli
+
+# Авторизуйтесь
+railway login
+
+# Создайте проект
+railway init
+
+# Добавьте PostgreSQL
+railway add -p postgres
+
+# Деплой
+railway up
 ```
 
-2. **Войдите в аккаунт**
+---
+
+## Render
+
+### Автоматический деплой через Blueprint
+
+1. Форкните репозиторий на GitHub
+2. Зайдите на [Render Dashboard](https://dashboard.render.com)
+3. New → Blueprint
+4. Подключите репозиторий
+5. Render создаст:
+   - Web Service из `render.yaml`
+   - PostgreSQL базу данных
+6. Установите `OPENROUTER_API_KEY` в dashboard
+
+### Ручной деплой
+
+1. Создайте PostgreSQL базу на Render
+2. Создайте Web Service:
+   - Docker runtime
+   - Dockerfile: `Dockerfile.production`
+3. Добавьте переменные:
+   - `DATABASE_URL` (из PostgreSQL)
+   - `OPENROUTER_API_KEY`
+
+---
+
+## Docker Compose (Локальная разработка)
+
 ```bash
-vercel login
+# Запустите все сервисы (frontend + backend + PostgreSQL)
+docker-compose up -d
+
+# Или только production build
+docker-compose --profile production up -d
+
+# Логи
+docker-compose logs -f backend
+
+# Остановка
+docker-compose down
 ```
 
-3. **Деплой**
+Приложение будет доступно:
+- Frontend: http://localhost:5173
+- Backend API: http://localhost:3001
+- Production: http://localhost:80
+
+---
+
+## Docker (Продакшн)
+
 ```bash
-vercel
+# Build образа
+docker build -f Dockerfile.production -t ai-redactor .
+
+# Запуск с внешней PostgreSQL
+docker run -d \
+  --name ai-redactor \
+  -p 80:80 \
+  -e DATABASE_URL="postgresql://user:pass@host:5432/db" \
+  -e OPENROUTER_API_KEY="sk-or-v1-..." \
+  ai-redactor
 ```
 
-4. **Добавьте переменные окружения**
+---
+
+## Heroku
+
 ```bash
-vercel env add VITE_ANTHROPIC_API_KEY
+# Создайте приложение
+heroku create ai-redactor
+
+# Добавьте PostgreSQL
+heroku addons:create heroku-postgresql:mini
+
+# Установите переменные
+heroku config:set OPENROUTER_API_KEY=sk-or-v1-...
+
+# Установите buildpack для LibreOffice
+heroku buildpacks:add https://github.com/heroku/heroku-buildpack-apt
+echo "libreoffice-core libreoffice-writer fonts-liberation" > Aptfile
+
+# Деплой
+git push heroku main
 ```
 
-### Способ 2: Через GitHub интеграцию
+---
 
-1. Загрузите проект на GitHub
-2. Перейдите на [vercel.com](https://vercel.com)
-3. Нажмите "Import Project"
-4. Выберите ваш GitHub репозиторий
-5. В настройках добавьте переменную окружения:
-   - Name: `VITE_ANTHROPIC_API_KEY`
-   - Value: ваш API ключ Anthropic
-6. Нажмите "Deploy"
+## VPS / Dedicated Server
 
-### Production URL
+### Установка зависимостей (Ubuntu/Debian)
 
-После успешного деплоя вы получите URL вида:
-```
-https://your-project.vercel.app
-```
-
-## Netlify
-
-### Способ 1: Через Netlify CLI
-
-1. **Установите Netlify CLI**
 ```bash
-npm install -g netlify-cli
-```
+# Node.js 20
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs
 
-2. **Соберите проект**
-```bash
-npm run build
-```
+# LibreOffice
+sudo apt-get install -y libreoffice-core libreoffice-writer
 
-3. **Деплой**
-```bash
-netlify deploy --prod --dir=dist
-```
+# Fonts (для кириллицы)
+sudo apt-get install -y fonts-liberation fonts-dejavu fonts-freefont-ttf
 
-### Способ 2: Через Netlify UI
+# PostgreSQL
+sudo apt-get install -y postgresql postgresql-contrib
 
-1. Соберите проект локально:
-```bash
-npm run build
-```
-
-2. Перейдите на [netlify.com](https://www.netlify.com/)
-3. Drag & drop папку `dist` в зону деплоя
-4. В Site Settings → Environment Variables добавьте:
-   - Key: `VITE_ANTHROPIC_API_KEY`
-   - Value: ваш API ключ
-
-## GitHub Pages
-
-1. Установите пакет для деплоя:
-```bash
-npm install --save-dev gh-pages
-```
-
-2. Добавьте в `package.json`:
-```json
-{
-  "homepage": "https://yourusername.github.io/AI-Redactor",
-  "scripts": {
-    "predeploy": "npm run build",
-    "deploy": "gh-pages -d dist"
-  }
-}
-```
-
-3. Обновите `vite.config.js`:
-```js
-export default defineConfig({
-  base: '/AI-Redactor/',
-  // ... остальная конфигурация
-})
-```
-
-4. Деплой:
-```bash
-npm run deploy
-```
-
-**⚠️ Важно:** GitHub Pages не поддерживает переменные окружения. Не используйте для production!
-
-## Docker
-
-### Dockerfile
-
-Создайте `Dockerfile`:
-
-```dockerfile
-FROM node:18-alpine AS builder
-
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci
-COPY . .
-RUN npm run build
-
-FROM nginx:alpine
-COPY --from=builder /app/dist /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/nginx.conf
-EXPOSE 80
-CMD ["nginx", "-g", "daemon off;"]
-```
-
-### nginx.conf
-
-```nginx
-events {
-    worker_connections 1024;
-}
-
-http {
-    include /etc/nginx/mime.types;
-
-    server {
-        listen 80;
-        root /usr/share/nginx/html;
-        index index.html;
-
-        location / {
-            try_files $uri $uri/ /index.html;
-        }
-    }
-}
+# Создание базы данных
+sudo -u postgres createuser ai_redactor
+sudo -u postgres createdb -O ai_redactor ai_redactor
+sudo -u postgres psql -c "ALTER USER ai_redactor PASSWORD 'your_password';"
 ```
 
 ### Сборка и запуск
 
 ```bash
-docker build -t ai-redactor .
-docker run -p 80:80 -e VITE_ANTHROPIC_API_KEY=your_key ai-redactor
+# Клонирование
+git clone https://github.com/your-repo/ai-redactor
+cd ai-redactor
+
+# Установка зависимостей
+npm ci
+cd server && npm ci && cd ..
+
+# Сборка frontend
+npm run build
+
+# Копирование frontend в public
+mkdir -p server/public
+cp -r dist/* server/public/
+
+# Настройка .env
+cp .env.example server/.env
+# Отредактируйте server/.env
+
+# Запуск
+cd server && node index.js
 ```
 
-## Переменные окружения
-
-Для всех платформ необходимо настроить:
-
-| Переменная | Описание | Обязательна |
-|-----------|----------|-------------|
-| `VITE_ANTHROPIC_API_KEY` | API ключ Anthropic Claude | ✅ Да |
-
-## Проверка перед деплоем
-
-Чеклист перед деплоем:
-
-- [ ] Выполнена сборка без ошибок (`npm run build`)
-- [ ] Проверен preview (`npm run preview`)
-- [ ] Добавлены все переменные окружения
-- [ ] `.env` файл в `.gitignore`
-- [ ] Обновлен README с правильными URL
-- [ ] Проверена работа на мобильных устройствах
-
-## Оптимизация Production
-
-1. **Минификация**
-```js
-// vite.config.js уже настроен
-build: {
-  minify: 'terser'
-}
-```
-
-2. **Code splitting**
-```js
-// Уже настроено в vite.config.js
-rollupOptions: {
-  output: {
-    manualChunks: {
-      'react-vendor': ['react', 'react-dom'],
-      'icons': ['lucide-react']
-    }
-  }
-}
-```
-
-3. **Кеширование**
-- Vercel автоматически настроит правильные заголовки
-- Для других платформ используйте CDN
-
-## Мониторинг
-
-### Vercel Analytics
-
-Добавьте в `App.jsx`:
-```jsx
-import { Analytics } from '@vercel/analytics/react';
-
-function App() {
-  return (
-    <>
-      <YourApp />
-      <Analytics />
-    </>
-  );
-}
-```
-
-### Sentry для отслеживания ошибок
+### Systemd сервис
 
 ```bash
-npm install @sentry/react
+sudo tee /etc/systemd/system/ai-redactor.service << EOF
+[Unit]
+Description=AI-Redactor Server
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/opt/ai-redactor/server
+ExecStart=/usr/bin/node index.js
+Restart=on-failure
+Environment=NODE_ENV=production
+EnvironmentFile=/opt/ai-redactor/server/.env
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl enable ai-redactor
+sudo systemctl start ai-redactor
 ```
 
-```jsx
-import * as Sentry from "@sentry/react";
+---
 
-Sentry.init({
-  dsn: "your-sentry-dsn",
-  environment: import.meta.env.MODE,
-});
+## Миграции базы данных
+
+Миграции запускаются автоматически при старте сервера.
+
+Для ручного запуска:
+
+```bash
+cd server
+npm run migrate
 ```
+
+---
+
+## Проверка работоспособности
+
+```bash
+# Health check
+curl http://localhost:3001/api/health
+
+# Ожидаемый ответ:
+{
+  "status": "ok",
+  "timestamp": "2024-12-22T10:00:00.000Z",
+  "libreOffice": true,
+  "ai": true,
+  "database": true
+}
+```
+
+---
 
 ## Troubleshooting
 
-### Проблема: "Module not found"
+### LibreOffice не найден
 
-**Решение:** Проверьте что все зависимости установлены:
 ```bash
-rm -rf node_modules package-lock.json
-npm install
+# Проверьте установку
+libreoffice --version
+
+# Если не установлен (Ubuntu/Debian)
+sudo apt-get install libreoffice-core libreoffice-writer
 ```
 
-### Проблема: API ключ не работает
+### База данных не подключается
 
-**Решение:** Убедитесь что:
-1. Переменная называется `VITE_ANTHROPIC_API_KEY` (с префиксом VITE_)
-2. После добавления переменной перезапущен build
-3. На платформе деплоя переменная добавлена корректно
+1. Проверьте `DATABASE_URL`:
+   ```bash
+   psql $DATABASE_URL -c "SELECT 1"
+   ```
+2. Для облачных провайдеров убедитесь, что SSL включён:
+   ```
+   DATABASE_URL=postgresql://...?sslmode=require
+   ```
 
-### Проблема: 404 на роутах
+### Ошибки с кириллицей в PDF
 
-**Решение:** Настройте rewrites:
-
-Vercel: уже настроено в `vercel.json`
-
-Netlify: создайте `_redirects`:
+Установите шрифты:
+```bash
+sudo apt-get install fonts-liberation fonts-dejavu fonts-freefont-ttf
 ```
-/*    /index.html   200
-```
 
-## Безопасность
+### AI не работает
 
-1. **Никогда** не коммитьте `.env` файлы
-2. Используйте разные API ключи для dev и production
-3. Ограничьте rate limits на API ключах
-4. Регулярно ротируйте API ключи
-5. Используйте HTTPS (автоматически на Vercel/Netlify)
-
-## Контакты для поддержки
-
-Если возникли проблемы при деплое:
-- 📧 Email: support@example.com
-- 💬 GitHub Issues: [создать issue](https://github.com/yourusername/AI-Redactor/issues)
+1. Проверьте `OPENROUTER_API_KEY`
+2. Проверьте баланс на [openrouter.ai](https://openrouter.ai)
+3. Бесплатные модели имеют лимиты

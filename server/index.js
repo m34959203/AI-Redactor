@@ -2,6 +2,7 @@
  * AI-Redactor Backend Server
  * Provides DOCX to PDF conversion using LibreOffice
  * Adds page numbering and Table of Contents using pdf-lib
+ * Supports PostgreSQL database for persistent storage
  */
 
 import express from 'express';
@@ -20,8 +21,15 @@ import {
   NEEDS_REVIEW_SECTION,
   isValidSection
 } from '../shared/sections.js';
+import aiRoutes from './routes/ai.js';
+import dataRoutes from './routes/data.js';
+import { testConnection } from './db/config.js';
+import { runMigrations, isDatabaseReady } from './db/migrate.js';
 
 console.log('=== Server module loading ===');
+
+// Database initialization flag
+let databaseAvailable = false;
 
 const execAsync = promisify(exec);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -126,12 +134,21 @@ app.use((req, res, next) => {
 app.get('/api/health', async (req, res) => {
   console.log('Health check requested');
   const libreOfficeAvailable = await checkLibreOffice();
+  const aiAvailable = !!process.env.OPENROUTER_API_KEY;
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
-    libreOffice: libreOfficeAvailable
+    libreOffice: libreOfficeAvailable,
+    ai: aiAvailable,
+    database: databaseAvailable
   });
 });
+
+// AI Routes (proxy for OpenRouter API - keeps API key secure)
+app.use('/api/ai', aiRoutes);
+
+// Data Routes (articles, sessions, archive - requires database)
+app.use('/api/data', dataRoutes);
 
 /**
  * Convert DOCX to PDF using LibreOffice
@@ -1124,15 +1141,46 @@ app.use((error, req, res, next) => {
   res.status(500).json({ error: error.message || 'Internal server error' });
 });
 
+/**
+ * Initialize database connection and run migrations
+ */
+async function initializeDatabase() {
+  if (!process.env.DATABASE_URL && !process.env.DB_HOST) {
+    console.log('⚠️  No database configured. Running in memory-only mode.');
+    console.log('   Set DATABASE_URL or DB_HOST to enable persistent storage.');
+    return false;
+  }
+
+  try {
+    const connected = await testConnection();
+    if (!connected) {
+      console.log('⚠️  Database connection failed. Running in memory-only mode.');
+      return false;
+    }
+
+    await runMigrations();
+    console.log('✅ Database initialized successfully');
+    return true;
+  } catch (error) {
+    console.error('❌ Database initialization failed:', error.message);
+    console.log('   Running in memory-only mode.');
+    return false;
+  }
+}
+
 // Start server
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`\n🚀 AI-Redactor Server running on http://localhost:${PORT}`);
   console.log('\nAPI Endpoints:');
-  console.log('  GET  /api/health          - Health check');
-  console.log('  POST /api/convert         - Convert single DOCX to PDF');
-  console.log('  POST /api/convert-base64  - Convert DOCX to PDF (base64)');
+  console.log('  GET  /api/health           - Health check');
+  console.log('  POST /api/convert          - Convert single DOCX to PDF');
+  console.log('  POST /api/convert-base64   - Convert DOCX to PDF (base64)');
   console.log('  POST /api/generate-journal - Generate journal from multiple files');
+  console.log('  /api/data/*                - Data persistence (articles, archive)');
   console.log('');
+
+  // Initialize database
+  databaseAvailable = await initializeDatabase();
 
   // Check LibreOffice availability asynchronously after server starts
   checkLibreOffice().then(available => {
