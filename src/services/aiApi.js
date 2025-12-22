@@ -15,10 +15,14 @@ const API_URL = "https://openrouter.ai/api/v1/chat/completions";
 const MODEL = "google/gemma-3-27b-it:free";
 // Fallback models in order of preference (updated December 2025)
 const FALLBACK_MODELS = [
-  "deepseek/deepseek-chat-v3-0324:free",  // 131K context, 685B MoE, excellent reasoning
+  "qwen/qwen3-32b:free",                    // 32B, strong multilingual support
   "meta-llama/llama-3.3-70b-instruct:free", // 128K context, strong classification
   "google/gemma-3-12b-it:free"              // 128K context, lighter fallback
 ];
+
+// Rate limiting configuration
+const RATE_LIMIT_DELAY = 2000; // 2 seconds between requests
+let lastRequestTime = 0;
 
 // System prompt for consistent AI behavior
 const SYSTEM_PROMPT = `Ты - эксперт-классификатор научных публикаций для академического журнала.
@@ -95,17 +99,34 @@ const extractJsonFromResponse = (response) => {
 };
 
 /**
+ * Rate limiting helper - waits if needed before making request
+ */
+const waitForRateLimit = async () => {
+  const now = Date.now();
+  const timeSinceLastRequest = now - lastRequestTime;
+  if (timeSinceLastRequest < RATE_LIMIT_DELAY) {
+    const waitTime = RATE_LIMIT_DELAY - timeSinceLastRequest;
+    await new Promise(resolve => setTimeout(resolve, waitTime));
+  }
+  lastRequestTime = Date.now();
+};
+
+/**
  * Makes a request to OpenRouter API with system prompt
  * @param {string} prompt - The prompt to send
  * @param {number} maxTokens - Maximum tokens for response
  * @param {number} fallbackIndex - Index of fallback model to use (-1 = primary model)
+ * @param {number} retryCount - Current retry count for rate limiting
  */
-const makeAIRequest = async (prompt, maxTokens = 1000, fallbackIndex = -1) => {
+const makeAIRequest = async (prompt, maxTokens = 1000, fallbackIndex = -1, retryCount = 0) => {
   const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY;
 
   if (!apiKey) {
     throw new Error("API_KEY_MISSING");
   }
+
+  // Apply rate limiting
+  await waitForRateLimit();
 
   // Select model based on fallback index
   const model = fallbackIndex < 0 ? MODEL : FALLBACK_MODELS[fallbackIndex];
@@ -145,12 +166,21 @@ const makeAIRequest = async (prompt, maxTokens = 1000, fallbackIndex = -1) => {
         throw new Error("API_KEY_INVALID");
       }
 
-      // Retry with next fallback on rate limit, server errors, or model not found (404)
+      // Handle rate limit with exponential backoff (up to 3 retries on same model)
+      if (response.status === 429 && retryCount < 3) {
+        const backoffTime = Math.pow(2, retryCount + 1) * 1000; // 2s, 4s, 8s
+        console.warn(`Rate limit hit on ${model}, waiting ${backoffTime}ms before retry ${retryCount + 1}...`);
+        await new Promise(resolve => setTimeout(resolve, backoffTime));
+        return makeAIRequest(prompt, maxTokens, fallbackIndex, retryCount + 1);
+      }
+
+      // Retry with next fallback on rate limit (after retries exhausted), server errors, or model not found (404)
       if (!isLastFallback && (response.status === 404 || response.status === 429 || response.status >= 500)) {
         const nextFallbackIndex = fallbackIndex + 1;
         const nextModel = FALLBACK_MODELS[nextFallbackIndex];
         console.warn(`Model ${model} failed (${response.status}), trying fallback: ${nextModel}...`);
-        return makeAIRequest(prompt, maxTokens, nextFallbackIndex);
+        // Reset retry count for new model
+        return makeAIRequest(prompt, maxTokens, nextFallbackIndex, 0);
       }
 
       throw new Error(`OpenRouter API error: ${errorMessage}`);
