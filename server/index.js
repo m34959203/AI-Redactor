@@ -565,8 +565,79 @@ async function addSectionHeaderToArticle(pdfBuffer, sectionName) {
 }
 
 /**
+ * Check if a PDF page is empty (contains no meaningful content)
+ * @param {PDFPage} page - The page to check
+ * @param {PDFDocument} pdfDoc - The source PDF document
+ * @param {number} pageIndex - Index of the page in the document
+ * @returns {Promise<boolean>} - True if page is empty
+ */
+async function isPageEmpty(page, pdfDoc, pageIndex) {
+  try {
+    // Get page content stream
+    const contentRef = page.node.get(page.node.context.obj('Contents'));
+
+    if (!contentRef) {
+      // No content stream - page is definitely empty
+      return true;
+    }
+
+    // Get the raw content stream data
+    let contentStream = '';
+
+    if (contentRef.toString().includes('Array')) {
+      // Multiple content streams
+      const contents = page.node.Contents();
+      if (contents) {
+        for (const streamRef of contents.asArray()) {
+          const stream = page.node.context.lookup(streamRef);
+          if (stream && stream.getContentsString) {
+            contentStream += stream.getContentsString() || '';
+          }
+        }
+      }
+    } else {
+      // Single content stream
+      const stream = page.node.context.lookup(contentRef);
+      if (stream && stream.getContentsString) {
+        contentStream = stream.getContentsString() || '';
+      }
+    }
+
+    // Remove whitespace and comments
+    const cleanedContent = contentStream
+      .replace(/%[^\n]*\n/g, '') // Remove comments
+      .replace(/\s+/g, ' ')      // Normalize whitespace
+      .trim();
+
+    // Check if there's any actual drawing content
+    // Look for text operators (Tj, TJ, '), image operators (Do), path operators (m, l, c, re, f, S)
+    const hasText = /\((.*?)\)\s*Tj|<[0-9A-Fa-f]+>\s*Tj|\]\s*TJ|'\s*\(|"\s*\(/i.test(cleanedContent);
+    const hasImage = /\/\w+\s+Do/i.test(cleanedContent);
+    const hasPath = /\d+\.?\d*\s+\d+\.?\d*\s+m|\s+re\s+[fFsS\*]|\s+l\s+|\s+c\s+/i.test(cleanedContent);
+    const hasLine = /\d+\.?\d*\s+\d+\.?\d*\s+\d+\.?\d*\s+\d+\.?\d*\s+re\s+[fF]/i.test(cleanedContent);
+
+    // If content is very short (just setup commands) and has no actual content, it's empty
+    if (cleanedContent.length < 100 && !hasText && !hasImage && !hasPath) {
+      return true;
+    }
+
+    // Page has meaningful content
+    if (hasText || hasImage || hasPath || hasLine) {
+      return false;
+    }
+
+    // Content stream exists but has no meaningful drawing operators
+    return cleanedContent.length < 200;
+  } catch (err) {
+    // If we can't determine, assume page is not empty to be safe
+    console.warn(`Could not determine if page ${pageIndex} is empty:`, err.message);
+    return false;
+  }
+}
+
+/**
  * Merge multiple PDF files using pdf-lib (no external tools needed)
- * Also adds page numbering
+ * Also adds page numbering and removes empty pages
  * @param {string[]} pdfPaths - Array of PDF file paths
  * @param {string} outputPath - Path for merged PDF
  */
@@ -574,12 +645,39 @@ async function mergePdfs(pdfPaths, outputPath) {
   try {
     // Use pdf-lib for merging (works everywhere, no external tools)
     const mergedPdf = await PDFDocument.create();
+    let removedEmptyPages = 0;
 
     for (const pdfPath of pdfPaths) {
       const pdfBuffer = await fs.readFile(pdfPath);
       const pdf = await PDFDocument.load(pdfBuffer);
-      const copiedPages = await mergedPdf.copyPages(pdf, pdf.getPageIndices());
-      copiedPages.forEach((page) => mergedPdf.addPage(page));
+      const pages = pdf.getPages();
+      const pageIndices = pdf.getPageIndices();
+
+      // Filter out empty pages (except for first page of each file which could be intentional)
+      const nonEmptyIndices = [];
+      for (let i = 0; i < pageIndices.length; i++) {
+        const pageIndex = pageIndices[i];
+        const page = pages[pageIndex];
+
+        // Always keep the first page of each document (could be intentional)
+        // Check other pages for emptiness
+        if (i === 0 || !(await isPageEmpty(page, pdf, pageIndex))) {
+          nonEmptyIndices.push(pageIndex);
+        } else {
+          removedEmptyPages++;
+          console.log(`Removing empty page ${pageIndex + 1} from ${path.basename(pdfPath)}`);
+        }
+      }
+
+      // Copy only non-empty pages
+      if (nonEmptyIndices.length > 0) {
+        const copiedPages = await mergedPdf.copyPages(pdf, nonEmptyIndices);
+        copiedPages.forEach((page) => mergedPdf.addPage(page));
+      }
+    }
+
+    if (removedEmptyPages > 0) {
+      console.log(`Total empty pages removed: ${removedEmptyPages}`);
     }
 
     // Save merged PDF
