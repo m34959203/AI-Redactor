@@ -17,14 +17,14 @@ RUN npm run build
 # Production image with LibreOffice
 FROM node:20-slim
 
-# Install LibreOffice, Nginx and PDF tools
+# Install LibreOffice and PDF tools
 RUN apt-get update && apt-get install -y \
     libreoffice \
     poppler-utils \
-    nginx \
     fonts-liberation \
     fonts-dejavu \
     fonts-freefont-ttf \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -36,49 +36,21 @@ RUN cd server && npm ci --only=production
 COPY server/ ./server/
 COPY shared/ ./shared/
 
-# Copy built frontend
-COPY --from=frontend-builder /app/dist /var/www/html
-
-# Nginx configuration with larger body size for file uploads
-RUN echo 'server { \n\
-    listen 80; \n\
-    server_name localhost; \n\
-    \n\
-    location / { \n\
-        root /var/www/html; \n\
-        index index.html; \n\
-        try_files $uri $uri/ /index.html; \n\
-    } \n\
-    \n\
-    location /api { \n\
-        proxy_pass http://127.0.0.1:3001; \n\
-        proxy_http_version 1.1; \n\
-        proxy_set_header Upgrade $http_upgrade; \n\
-        proxy_set_header Connection "upgrade"; \n\
-        proxy_set_header Host $host; \n\
-        proxy_set_header X-Real-IP $remote_addr; \n\
-        proxy_set_header X-Session-Id $http_x_session_id; \n\
-        proxy_read_timeout 300s; \n\
-        proxy_connect_timeout 75s; \n\
-        client_max_body_size 100M; \n\
-    } \n\
-}' > /etc/nginx/sites-available/default
+# Copy built frontend to server/public for static serving
+COPY --from=frontend-builder /app/dist ./server/public
 
 # Create temp directory
 RUN mkdir -p /app/server/temp && chmod 777 /app/server/temp
 
 # Environment variables
 ENV NODE_ENV=production
-ENV PORT=3001
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:3001/api/health || exit 1
+    CMD curl -f http://localhost:${PORT:-8080}/api/health || exit 1
 
-# Start script
-RUN echo '#!/bin/bash \n\
-nginx && node /app/server/index.js' > /app/start.sh && chmod +x /app/start.sh
+EXPOSE 8080
 
-EXPOSE 80 3001
+WORKDIR /app/server
 
-CMD ["/app/start.sh"]
+CMD ["node", "index.js"]
