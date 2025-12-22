@@ -1,6 +1,23 @@
 version: '3.8'
 
 services:
+  # PostgreSQL Database
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ai_redactor
+      POSTGRES_USER: ai_redactor
+      POSTGRES_PASSWORD: ai_redactor_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ai_redactor -d ai_redactor"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   # Frontend (React + Vite)
   frontend:
     build:
@@ -25,6 +42,12 @@ services:
       - "3001:3001"
     environment:
       - PORT=3001
+      - DATABASE_URL=postgresql://ai_redactor:ai_redactor_dev@db:5432/ai_redactor
+      - DB_SSL=false
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+    depends_on:
+      db:
+        condition: service_healthy
     volumes:
       - ./server/temp:/app/temp
     healthcheck:
@@ -41,5 +64,15 @@ services:
     ports:
       - "80:80"
       - "3001:3001"
+    environment:
+      - DATABASE_URL=postgresql://ai_redactor:ai_redactor_dev@db:5432/ai_redactor
+      - DB_SSL=false
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+    depends_on:
+      db:
+        condition: service_healthy
     profiles:
       - production
+
+volumes:
+  postgres_data:

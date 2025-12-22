@@ -1,12 +1,13 @@
 {
   "name": "ai-redactor-server",
   "version": "1.0.0",
-  "description": "Backend server for AI-Redactor with LibreOffice PDF conversion",
+  "description": "Backend server for AI-Redactor with LibreOffice PDF conversion and PostgreSQL storage",
   "main": "index.js",
   "type": "module",
   "scripts": {
     "start": "node index.js",
-    "dev": "node --watch index.js"
+    "dev": "node --watch index.js",
+    "migrate": "node db/migrate.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
@@ -15,6 +16,7 @@
     "docx-merger": "^1.0.0",
     "uuid": "^9.0.0",
     "pdf-lib": "^1.17.1",
-    "@pdf-lib/fontkit": "^1.1.1"
+    "@pdf-lib/fontkit": "^1.1.1",
+    "pg": "^8.11.3"
   }
 }

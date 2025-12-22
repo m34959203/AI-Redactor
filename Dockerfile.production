@@ -1,4 +1,6 @@
 # AI-Redactor Production Build (Full Stack)
+# Supports PostgreSQL database for persistent storage
+
 FROM node:20-slim AS frontend-builder
 
 WORKDIR /app
@@ -32,11 +34,12 @@ COPY server/package*.json ./server/
 RUN cd server && npm ci --only=production
 
 COPY server/ ./server/
+COPY shared/ ./shared/
 
 # Copy built frontend
 COPY --from=frontend-builder /app/dist /var/www/html
 
-# Nginx configuration
+# Nginx configuration with larger body size for file uploads
 RUN echo 'server { \n\
     listen 80; \n\
     server_name localhost; \n\
@@ -54,12 +57,23 @@ RUN echo 'server { \n\
         proxy_set_header Connection "upgrade"; \n\
         proxy_set_header Host $host; \n\
         proxy_set_header X-Real-IP $remote_addr; \n\
+        proxy_set_header X-Session-Id $http_x_session_id; \n\
+        proxy_read_timeout 300s; \n\
+        proxy_connect_timeout 75s; \n\
         client_max_body_size 100M; \n\
     } \n\
 }' > /etc/nginx/sites-available/default
 
 # Create temp directory
 RUN mkdir -p /app/server/temp && chmod 777 /app/server/temp
+
+# Environment variables
+ENV NODE_ENV=production
+ENV PORT=3001
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:3001/api/health || exit 1
 
 # Start script
 RUN echo '#!/bin/bash \n\
