@@ -102,9 +102,9 @@ const splitTextToLines = (doc, text, maxWidth) => {
 
 /**
  * Adds page number and journal footer to the current page
- * Footer format alternates between odd and even pages:
- * - Odd pages: "Вестник Жезказганского Университета имени О.А. Байконурова | page_number" (right-aligned)
- * - Even pages: "page_number | Вестник Жезказганского Университета имени О.А. Байконурова" (left-aligned)
+ * Footer format alternates between odd and even pages (all centered):
+ * - Odd pages: "Вестник Жезказганского Университета имени О.А. Байконурова | page_number"
+ * - Even pages: "page_number | Вестник Жезказганского Университета имени О.А. Байконурова"
  * @param {jsPDF} doc - jsPDF instance
  * @param {number} pageNum - Page number
  */
@@ -123,13 +123,13 @@ const addPageNumber = (doc, pageNum) => {
   doc.line(MARGIN_LEFT, lineY, PAGE_WIDTH - MARGIN_RIGHT, lineY);
 
   if (isOddPage) {
-    // Odd pages: "Journal Title | page_number" (right-aligned)
+    // Odd pages: "Journal Title | page_number" (centered)
     const footerText = `${journalTitle} | ${pageNum}`;
-    doc.text(footerText, PAGE_WIDTH - MARGIN_RIGHT, footerY, { align: 'right' });
+    doc.text(footerText, PAGE_WIDTH / 2, footerY, { align: 'center' });
   } else {
-    // Even pages: "page_number | Journal Title" (left-aligned)
+    // Even pages: "page_number | Journal Title" (centered)
     const footerText = `${pageNum} | ${journalTitle}`;
-    doc.text(footerText, MARGIN_LEFT, footerY, { align: 'left' });
+    doc.text(footerText, PAGE_WIDTH / 2, footerY, { align: 'center' });
   }
 };
 
