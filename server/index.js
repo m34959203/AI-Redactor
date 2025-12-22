@@ -20,6 +20,7 @@ import {
   NEEDS_REVIEW_SECTION,
   isValidSection
 } from '../shared/sections.js';
+import aiRoutes from './routes/ai.js';
 
 console.log('=== Server module loading ===');
 
@@ -126,12 +127,17 @@ app.use((req, res, next) => {
 app.get('/api/health', async (req, res) => {
   console.log('Health check requested');
   const libreOfficeAvailable = await checkLibreOffice();
+  const aiAvailable = !!process.env.OPENROUTER_API_KEY;
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
-    libreOffice: libreOfficeAvailable
+    libreOffice: libreOfficeAvailable,
+    ai: aiAvailable
   });
 });
+
+// AI Routes (proxy for OpenRouter API - keeps API key secure)
+app.use('/api/ai', aiRoutes);
 
 /**
  * Convert DOCX to PDF using LibreOffice
