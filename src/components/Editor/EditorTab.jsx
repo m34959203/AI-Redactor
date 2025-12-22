@@ -19,6 +19,9 @@ const EditorTab = ({
   onDeleteArticle,
   onStopEditing,
   onGeneratePDF,
+  onRetryClassification,
+  onRetryAllClassification,
+  retryingArticleId,
   fileInputRef,
   coverInputRef,
   descInputRef,
@@ -56,6 +59,9 @@ const EditorTab = ({
           coverPage={coverPage}
           descriptionPage={descriptionPage}
           finalPage={finalPage}
+          onRetryClassification={onRetryClassification}
+          onRetryAllClassification={onRetryAllClassification}
+          retryingArticleId={retryingArticleId}
         />
       )}
     </div>

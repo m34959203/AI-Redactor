@@ -1,5 +1,5 @@
 import React from 'react';
-import { Edit2, Trash2, Check, Download, BookOpen, AlertTriangle, User, Sparkles } from 'lucide-react';
+import { Edit2, Trash2, Check, Download, BookOpen, AlertTriangle, User, Sparkles, RefreshCw, RotateCcw } from 'lucide-react';
 import Alert from '../UI/Alert';
 import { ARTICLE_SECTIONS } from '../../services/aiApi';
 import { groupArticlesBySection, SECTION_ORDER, NEEDS_REVIEW_SECTION } from '../../utils/languageDetection';
@@ -37,8 +37,9 @@ const ConfidenceIndicator = ({ confidence, needsReview, manuallyClassified, reas
   return null;
 };
 
-const ArticleItem = ({ article, index, globalIndex, isEditing, onEdit, onUpdate, onDelete, onStopEditing }) => {
+const ArticleItem = ({ article, index, globalIndex, isEditing, onEdit, onUpdate, onDelete, onStopEditing, onRetryClassification, isRetrying }) => {
   const needsAttention = article.needsReview || (article.sectionConfidence && article.sectionConfidence < CONFIDENCE_THRESHOLDS.MEDIUM);
+  const canRetry = (article.needsReview || article.section === NEEDS_REVIEW_SECTION) && !article.manuallyClassified;
 
   return (
     <div className={`border rounded-xl p-6 hover:shadow-md transition bg-white ${
@@ -121,6 +122,20 @@ const ArticleItem = ({ article, index, globalIndex, isEditing, onEdit, onUpdate,
         )}
 
         <div className="flex gap-2">
+          {canRetry && onRetryClassification && (
+            <button
+              onClick={() => onRetryClassification(article.id)}
+              disabled={isRetrying}
+              className={`p-2 rounded-lg transition ${
+                isRetrying
+                  ? 'text-gray-400 cursor-not-allowed'
+                  : 'text-purple-600 hover:bg-purple-50'
+              }`}
+              title="Повторить AI классификацию"
+            >
+              <RotateCcw size={20} className={isRetrying ? 'animate-spin' : ''} />
+            </button>
+          )}
           <button
             onClick={() => onEdit(article.id)}
             className={`p-2 rounded-lg transition ${
@@ -145,7 +160,7 @@ const ArticleItem = ({ article, index, globalIndex, isEditing, onEdit, onUpdate,
   );
 };
 
-const SectionHeader = ({ title, count }) => {
+const SectionHeader = ({ title, count, onRetryAll, isRetrying }) => {
   const isNeedsReview = title === NEEDS_REVIEW_SECTION;
 
   return (
@@ -154,16 +169,33 @@ const SectionHeader = ({ title, count }) => {
         ? 'bg-gradient-to-r from-orange-500 to-red-500'
         : 'bg-gradient-to-r from-indigo-600 to-purple-600'
     } text-white`}>
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 flex-wrap">
         {isNeedsReview ? <AlertTriangle size={24} /> : <BookOpen size={24} />}
         <h3 className="text-xl font-bold">{title}</h3>
         <span className="bg-white/20 px-3 py-1 rounded-full text-sm">
           {count} {count === 1 ? 'статья' : count < 5 ? 'статьи' : 'статей'}
         </span>
         {isNeedsReview && (
-          <span className="text-sm opacity-80">
-            — выберите раздел для каждой статьи
-          </span>
+          <>
+            <span className="text-sm opacity-80">
+              — выберите раздел для каждой статьи
+            </span>
+            {onRetryAll && (
+              <button
+                onClick={onRetryAll}
+                disabled={isRetrying}
+                className={`ml-auto flex items-center gap-2 px-4 py-2 rounded-lg transition font-medium ${
+                  isRetrying
+                    ? 'bg-white/20 cursor-not-allowed'
+                    : 'bg-white/30 hover:bg-white/40'
+                }`}
+                title="Повторить AI анализ для всех статей в этом разделе"
+              >
+                <RefreshCw size={18} className={isRetrying ? 'animate-spin' : ''} />
+                {isRetrying ? 'Анализ...' : 'Повторить анализ'}
+              </button>
+            )}
+          </>
         )}
       </div>
     </div>
@@ -181,7 +213,10 @@ const ArticlesList = ({
   isProcessing,
   coverPage,
   descriptionPage,
-  finalPage
+  finalPage,
+  onRetryClassification,
+  onRetryAllClassification,
+  retryingArticleId
 }) => {
   const missingPages = [];
   if (!coverPage) missingPages.push('Титульный лист');
@@ -270,6 +305,8 @@ const ArticlesList = ({
                         onUpdate={onUpdateArticle}
                         onDelete={onDeleteArticle}
                         onStopEditing={onStopEditing}
+                        onRetryClassification={onRetryClassification}
+                        isRetrying={retryingArticleId === article.id}
                       />
                     );
                   })}
@@ -281,7 +318,12 @@ const ArticlesList = ({
           {/* Needs Review section (at the end) */}
           {groupedArticles[NEEDS_REVIEW_SECTION] && groupedArticles[NEEDS_REVIEW_SECTION].length > 0 && (
             <div className="mb-8">
-              <SectionHeader title={NEEDS_REVIEW_SECTION} count={groupedArticles[NEEDS_REVIEW_SECTION].length} />
+              <SectionHeader
+                title={NEEDS_REVIEW_SECTION}
+                count={groupedArticles[NEEDS_REVIEW_SECTION].length}
+                onRetryAll={onRetryAllClassification}
+                isRetrying={retryingArticleId === 'all'}
+              />
               <div className="space-y-4 ml-2">
                 {groupedArticles[NEEDS_REVIEW_SECTION].map((article) => {
                   const currentGlobalIndex = globalIndex;
@@ -297,6 +339,8 @@ const ArticlesList = ({
                       onUpdate={onUpdateArticle}
                       onDelete={onDeleteArticle}
                       onStopEditing={onStopEditing}
+                      onRetryClassification={onRetryClassification}
+                      isRetrying={retryingArticleId === article.id || retryingArticleId === 'all'}
                     />
                   );
                 })}

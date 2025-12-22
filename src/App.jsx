@@ -11,7 +11,7 @@ import ArchiveTab from './components/Archive/ArchiveTab';
 import InfoTab from './components/Info/InfoTab';
 
 import { useApp, useNotifications, useProcessing } from './context/AppContext';
-import { extractMetadataWithAI, checkSpelling, reviewArticle, detectArticleSection, ARTICLE_SECTIONS } from './services/aiApi';
+import { extractMetadataWithAI, checkSpelling, reviewArticle, detectArticleSection, ARTICLE_SECTIONS, retryArticleClassification, batchRetryClassification } from './services/aiApi';
 import { validatePageFile, validateArticleFile } from './utils/fileValidation';
 import { detectLanguage, sortArticlesBySectionAndLanguage, NEEDS_REVIEW_SECTION } from './utils/languageDetection';
 import { CONFIDENCE_THRESHOLDS } from './constants/sections';
@@ -42,6 +42,9 @@ const App = () => {
   const coverInputRef = useRef(null);
   const descInputRef = useRef(null);
   const finalInputRef = useRef(null);
+
+  // Local state for retry functionality
+  const [retryingArticleId, setRetryingArticleId] = useState(null);
 
   // Special page upload handlers
   const handleSpecialPageUpload = async (file, type) => {
@@ -308,6 +311,107 @@ const App = () => {
     }
   };
 
+  // Retry classification for a single article
+  const handleRetryClassification = async (articleId) => {
+    const article = articles.find(a => a.id === articleId);
+    if (!article) {
+      showError('Статья не найдена');
+      return;
+    }
+
+    setRetryingArticleId(articleId);
+
+    try {
+      const classification = await retryArticleClassification(
+        article.content,
+        article.title,
+        3 // 3 retry attempts
+      );
+
+      // Update the article with new classification
+      const updates = {
+        section: classification.section,
+        sectionConfidence: classification.confidence,
+        needsReview: classification.needsReview,
+        sectionReasoning: classification.reasoning,
+        retryAttempted: true,
+        retryTimestamp: new Date().toISOString()
+      };
+
+      actions.updateArticle(articleId, updates);
+
+      // Re-sort articles
+      const updated = articles.map((a) =>
+        a.id === articleId ? { ...a, ...updates } : a
+      );
+      actions.setArticles(sortArticlesBySectionAndLanguage(updated));
+
+      if (classification.section !== NEEDS_REVIEW_SECTION) {
+        showSuccess(`Статья классифицирована: ${classification.section}`);
+      } else {
+        showError('Не удалось классифицировать статью. Выберите раздел вручную.');
+      }
+    } catch (error) {
+      console.error('Retry classification error:', error);
+      showError('Ошибка при повторной классификации: ' + error.message);
+    } finally {
+      setRetryingArticleId(null);
+    }
+  };
+
+  // Retry classification for all unclassified articles
+  const handleRetryAllClassification = async () => {
+    const unclassifiedArticles = articles.filter(
+      a => (a.needsReview || a.section === NEEDS_REVIEW_SECTION) && !a.manuallyClassified
+    );
+
+    if (unclassifiedArticles.length === 0) {
+      showSuccess('Все статьи уже классифицированы');
+      return;
+    }
+
+    setRetryingArticleId('all');
+    setProcessing(true, `Повторный анализ: 0/${unclassifiedArticles.length}...`);
+
+    try {
+      const results = await batchRetryClassification(
+        unclassifiedArticles,
+        (current, total, article) => {
+          setProcessing(true, `Повторный анализ: ${current}/${total} - ${article.title.substring(0, 30)}...`);
+        }
+      );
+
+      // Update all articles with new classification results
+      const updatedArticles = articles.map(article => {
+        const result = results.find(r => r.id === article.id);
+        if (result) {
+          return result;
+        }
+        return article;
+      });
+
+      actions.setArticles(sortArticlesBySectionAndLanguage(updatedArticles));
+
+      // Calculate statistics
+      const successCount = results.filter(r => r.section !== NEEDS_REVIEW_SECTION).length;
+      const failedCount = results.length - successCount;
+
+      if (successCount > 0 && failedCount === 0) {
+        showSuccess(`Успешно классифицировано ${successCount} статей`);
+      } else if (successCount > 0) {
+        showSuccess(`Классифицировано ${successCount} статей, ${failedCount} требуют ручной классификации`);
+      } else {
+        showError(`Не удалось классифицировать ${failedCount} статей. Выберите разделы вручную.`);
+      }
+    } catch (error) {
+      console.error('Batch retry classification error:', error);
+      showError('Ошибка при массовой классификации: ' + error.message);
+    } finally {
+      setRetryingArticleId(null);
+      setProcessing(false);
+    }
+  };
+
   // Handle onboarding complete
   const handleOnboardingComplete = () => {
     actions.setOnboardingSeen();
@@ -336,6 +440,9 @@ const App = () => {
             onDeleteArticle={deleteArticle}
             onStopEditing={() => actions.setEditingArticle(null)}
             onGeneratePDF={handleGeneratePDF}
+            onRetryClassification={handleRetryClassification}
+            onRetryAllClassification={handleRetryAllClassification}
+            retryingArticleId={retryingArticleId}
             fileInputRef={fileInputRef}
             coverInputRef={coverInputRef}
             descInputRef={descInputRef}
