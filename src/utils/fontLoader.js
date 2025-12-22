@@ -1,10 +1,10 @@
 /**
  * Cyrillic font loader for jsPDF
- * Uses PT Serif (Times New Roman-like, supports Cyrillic) for academic journals
- * PT Serif has metrics similar to Times New Roman and full Cyrillic support
+ * Uses Noto Serif (Times New Roman-like, supports full Cyrillic including Kazakh) for academic journals
+ * Noto Serif has metrics similar to Times New Roman and full Cyrillic Extended support
  */
 
-// Primary: PT Serif from Google Fonts repository (Times-like, supports Cyrillic)
+// Primary: Noto Serif from MuPDF repository (Times-like, supports Kazakh Cyrillic)
 const FONT_URLS = {
   regular: 'https://raw.githubusercontent.com/ArtifexSoftware/mupdf/master/resources/fonts/noto/NotoSerif-Regular.ttf',
   bold: 'https://raw.githubusercontent.com/ArtifexSoftware/mupdf/master/resources/fonts/noto/NotoSerif-Bold.ttf',
@@ -18,14 +18,15 @@ const FALLBACK_URLS = {
   italic: 'https://raw.githubusercontent.com/ArtifexSoftware/mupdf/master/resources/fonts/droid/DroidSerif-Italic.ttf',
 };
 
-// Load PT Serif web font for html2canvas rendering
+// Load Noto Serif web font for html2canvas rendering (supports Kazakh Cyrillic)
 export const loadWebFont = () => {
-  // Add Google Fonts link for PT Serif
-  if (!document.getElementById('pt-serif-font')) {
+  // Add Google Fonts link for Noto Serif with Cyrillic Extended subset (supports Kazakh)
+  if (!document.getElementById('noto-serif-font')) {
     const link = document.createElement('link');
-    link.id = 'pt-serif-font';
+    link.id = 'noto-serif-font';
     link.rel = 'stylesheet';
-    link.href = 'https://fonts.googleapis.com/css2?family=PT+Serif:ital,wght@0,400;0,700;1,400;1,700&display=swap';
+    // Noto Serif supports full Kazakh Cyrillic (Ә, Ғ, Қ, Ң, Ө, Ұ, Ү, Һ, І)
+    link.href = 'https://fonts.googleapis.com/css2?family=Noto+Serif:ital,wght@0,400;0,700;1,400;1,700&subset=cyrillic,cyrillic-ext&display=swap';
     document.head.appendChild(link);
   }
 };
@@ -74,7 +75,7 @@ const loadFontFromUrl = async (url) => {
 export const preloadFonts = async () => {
   if (fontsLoaded) return true;
 
-  // Load web font for html2canvas rendering (PT Serif - Times New Roman alternative)
+  // Load web font for html2canvas rendering (Noto Serif - supports Kazakh Cyrillic)
   loadWebFont();
 
   try {

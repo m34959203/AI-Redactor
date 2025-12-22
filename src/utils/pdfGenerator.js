@@ -442,16 +442,17 @@ const renderHtmlAsImage = async (doc, html, startY, startPage) => {
     padding: 0;
     margin: 0;
     background: white;
-    font-family: 'PT Serif', 'Times New Roman', 'Liberation Serif', 'Noto Serif', Times, serif;
+    font-family: 'Noto Serif', 'Times New Roman', 'Liberation Serif', Times, serif;
     font-size: 12pt;
     line-height: 1.5;
     color: black;
   `;
 
   // Add styles for proper rendering with @font-face for Times New Roman alternative
+  // Using Noto Serif with Cyrillic Extended subset for full Kazakh language support
   const styleElement = document.createElement('style');
   styleElement.textContent = `
-    @import url('https://fonts.googleapis.com/css2?family=PT+Serif:ital,wght@0,400;0,700;1,400;1,700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Serif:ital,wght@0,400;0,700;1,400;1,700&subset=cyrillic,cyrillic-ext&display=swap');
 
     .docx-content * {
       max-width: 100%;
@@ -562,7 +563,7 @@ const renderHtmlAsImage = async (doc, html, startY, startPage) => {
       });
     }));
 
-    // Wait for fonts to load (PT Serif from Google Fonts)
+    // Wait for fonts to load (Noto Serif with Cyrillic Extended from Google Fonts)
     if (document.fonts && document.fonts.ready) {
       await document.fonts.ready;
     }
