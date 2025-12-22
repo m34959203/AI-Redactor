@@ -26,6 +26,44 @@ const RATE_LIMIT_DELAY_AFTER_429 = 15000; // 15 seconds after hitting rate limit
 let lastRequestTime = 0;
 let consecutiveErrors = 0;
 
+/**
+ * OpenRouter Free Tier Limits (as of 2025):
+ * - 20 requests per minute (RPM)
+ * - 50 requests per day (without credits)
+ * - 1000 requests per day (with $10+ credits)
+ */
+
+/**
+ * Parse rate limit error message and return user-friendly description
+ * @param {string} errorMessage - Raw error message from API
+ * @returns {{type: string, message: string, suggestion: string}}
+ */
+const parseRateLimitError = (errorMessage) => {
+  const msg = errorMessage?.toLowerCase() || '';
+
+  if (msg.includes('per-day') || msg.includes('per day')) {
+    return {
+      type: 'daily',
+      message: '⚠️ Дневной лимит бесплатных запросов исчерпан (50 запросов/день)',
+      suggestion: 'Пополните счёт OpenRouter на $10 для увеличения лимита до 1000 запросов/день, или подождите до завтра'
+    };
+  }
+
+  if (msg.includes('per-min') || msg.includes('per minute')) {
+    return {
+      type: 'minute',
+      message: '⏳ Превышен лимит запросов в минуту (20 запросов/мин)',
+      suggestion: 'Подождите минуту и попробуйте снова'
+    };
+  }
+
+  return {
+    type: 'unknown',
+    message: '⚠️ Лимит запросов OpenRouter исчерпан',
+    suggestion: 'Попробуйте позже или пополните счёт OpenRouter'
+  };
+};
+
 // System prompt for consistent AI behavior
 const SYSTEM_PROMPT = `Ты - эксперт-классификатор научных публикаций для академического журнала.
 Ты анализируешь научные статьи на русском, английском и казахском языках.
@@ -187,28 +225,44 @@ const makeAIRequest = async (prompt, maxTokens = 1000, fallbackIndex = -1, retry
         throw new Error("API_KEY_INVALID");
       }
 
-      // Handle rate limit with exponential backoff (up to 2 retries on same model)
-      if (response.status === 429 && retryCount < 2) {
-        incrementRateLimitErrors();
-        // Longer backoff: 10s, 20s
-        const backoffTime = Math.pow(2, retryCount + 1) * 5000;
-        console.warn(`Rate limit hit on ${model}, waiting ${backoffTime / 1000}s before retry ${retryCount + 1}...`);
-        await new Promise(resolve => setTimeout(resolve, backoffTime));
-        return makeAIRequest(prompt, maxTokens, fallbackIndex, retryCount + 1);
-      }
-
-      // Track rate limit errors
+      // Handle rate limit errors with user-friendly messages
       if (response.status === 429) {
         incrementRateLimitErrors();
+        const rateLimitInfo = parseRateLimitError(errorMessage);
+
+        // Daily limit - don't retry, inform user immediately
+        if (rateLimitInfo.type === 'daily') {
+          console.error('Daily rate limit reached:', errorMessage);
+          throw new Error(`RATE_LIMIT_DAILY|${rateLimitInfo.message}|${rateLimitInfo.suggestion}`);
+        }
+
+        // Minute limit - try retry with backoff
+        if (retryCount < 2) {
+          const backoffTime = Math.pow(2, retryCount + 1) * 5000; // 10s, 20s
+          console.warn(`${rateLimitInfo.message} - ожидание ${backoffTime / 1000}с...`);
+          await new Promise(resolve => setTimeout(resolve, backoffTime));
+          return makeAIRequest(prompt, maxTokens, fallbackIndex, retryCount + 1);
+        }
+
+        // Retries exhausted, try fallback model
+        if (!isLastFallback) {
+          const nextFallbackIndex = fallbackIndex + 1;
+          const nextModel = FALLBACK_MODELS[nextFallbackIndex];
+          console.warn(`Переключение на резервную модель: ${nextModel}...`);
+          await new Promise(resolve => setTimeout(resolve, 5000));
+          return makeAIRequest(prompt, maxTokens, nextFallbackIndex, 0);
+        }
+
+        // All fallbacks exhausted
+        throw new Error(`RATE_LIMIT|${rateLimitInfo.message}|${rateLimitInfo.suggestion}`);
       }
 
-      // Retry with next fallback on rate limit (after retries exhausted), server errors, or model not found (404)
-      if (!isLastFallback && (response.status === 404 || response.status === 429 || response.status >= 500)) {
+      // Retry with next fallback on server errors or model not found (404)
+      if (!isLastFallback && (response.status === 404 || response.status >= 500)) {
         const nextFallbackIndex = fallbackIndex + 1;
         const nextModel = FALLBACK_MODELS[nextFallbackIndex];
-        console.warn(`Model ${model} failed (${response.status}), trying fallback: ${nextModel}...`);
-        // Reset retry count for new model, wait extra time
-        await new Promise(resolve => setTimeout(resolve, 5000));
+        console.warn(`Модель ${model} недоступна (${response.status}), переключение на: ${nextModel}...`);
+        await new Promise(resolve => setTimeout(resolve, 3000));
         return makeAIRequest(prompt, maxTokens, nextFallbackIndex, 0);
       }
 
