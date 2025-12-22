@@ -21,17 +21,26 @@ import {
   isValidSection
 } from '../shared/sections.js';
 
+console.log('=== Server module loading ===');
+
 const execAsync = promisify(exec);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+console.log(`Starting server initialization... PORT=${PORT}`);
+
 // Temporary directory for file processing
 const TEMP_DIR = path.join(__dirname, 'temp');
 
 // Ensure temp directory exists
-await fs.mkdir(TEMP_DIR, { recursive: true });
+try {
+  await fs.mkdir(TEMP_DIR, { recursive: true });
+  console.log(`Temp directory ready: ${TEMP_DIR}`);
+} catch (err) {
+  console.error('Failed to create temp directory:', err);
+}
 
 // Middleware
 app.use(cors());
@@ -77,6 +86,12 @@ const upload = multer({
 app.use((req, res, next) => {
   req.sessionId = req.headers['x-session-id'] || uuidv4();
   next();
+});
+
+// Early health check (before all other routes)
+app.get('/api/health', (req, res) => {
+  console.log('Health check requested');
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
 /**
@@ -641,20 +656,6 @@ setInterval(cleanupTempFiles, 30 * 60 * 1000);
 
 // ============ API ROUTES ============
 
-// Cache LibreOffice availability (checked once at startup)
-let libreOfficeAvailable = null;
-
-/**
- * Health check (fast, non-blocking)
- */
-app.get('/api/health', (req, res) => {
-  res.json({
-    status: 'ok',
-    libreOffice: libreOfficeAvailable,
-    timestamp: new Date().toISOString()
-  });
-});
-
 /**
  * Convert single DOCX to PDF
  * POST /api/convert
@@ -1032,7 +1033,6 @@ app.listen(PORT, () => {
 
   // Check LibreOffice availability asynchronously after server starts
   checkLibreOffice().then(available => {
-    libreOfficeAvailable = available;
     if (available) {
       console.log('✅ LibreOffice is available');
     } else {
