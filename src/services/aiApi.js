@@ -12,8 +12,13 @@ import {
 } from '../constants/sections';
 
 const API_URL = "https://openrouter.ai/api/v1/chat/completions";
-const MODEL = "tngtech/deepseek-r1t2-chimera:free";
-const FALLBACK_MODEL = "meta-llama/llama-3.1-8b-instruct:free"; // Updated to working free model
+const MODEL = "google/gemma-3-27b-it:free";
+// Fallback models in order of preference (updated December 2025)
+const FALLBACK_MODELS = [
+  "deepseek/deepseek-chat-v3-0324:free",  // 131K context, 685B MoE, excellent reasoning
+  "meta-llama/llama-3.3-70b-instruct:free", // 128K context, strong classification
+  "google/gemma-3-12b-it:free"              // 128K context, lighter fallback
+];
 
 // System prompt for consistent AI behavior
 const SYSTEM_PROMPT = `Ты - эксперт-классификатор научных публикаций для академического журнала.
@@ -91,15 +96,20 @@ const extractJsonFromResponse = (response) => {
 
 /**
  * Makes a request to OpenRouter API with system prompt
+ * @param {string} prompt - The prompt to send
+ * @param {number} maxTokens - Maximum tokens for response
+ * @param {number} fallbackIndex - Index of fallback model to use (-1 = primary model)
  */
-const makeAIRequest = async (prompt, maxTokens = 1000, useFallback = false) => {
+const makeAIRequest = async (prompt, maxTokens = 1000, fallbackIndex = -1) => {
   const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY;
 
   if (!apiKey) {
     throw new Error("API_KEY_MISSING");
   }
 
-  const model = useFallback ? FALLBACK_MODEL : MODEL;
+  // Select model based on fallback index
+  const model = fallbackIndex < 0 ? MODEL : FALLBACK_MODELS[fallbackIndex];
+  const isLastFallback = fallbackIndex >= FALLBACK_MODELS.length - 1;
 
   try {
     const response = await fetch(API_URL, {
@@ -135,10 +145,12 @@ const makeAIRequest = async (prompt, maxTokens = 1000, useFallback = false) => {
         throw new Error("API_KEY_INVALID");
       }
 
-      // Retry with fallback on rate limit, server errors, or model not found (404)
-      if (!useFallback && (response.status === 404 || response.status === 429 || response.status >= 500)) {
-        console.warn(`Primary model failed (${response.status}), trying fallback...`);
-        return makeAIRequest(prompt, maxTokens, true);
+      // Retry with next fallback on rate limit, server errors, or model not found (404)
+      if (!isLastFallback && (response.status === 404 || response.status === 429 || response.status >= 500)) {
+        const nextFallbackIndex = fallbackIndex + 1;
+        const nextModel = FALLBACK_MODELS[nextFallbackIndex];
+        console.warn(`Model ${model} failed (${response.status}), trying fallback: ${nextModel}...`);
+        return makeAIRequest(prompt, maxTokens, nextFallbackIndex);
       }
 
       throw new Error(`OpenRouter API error: ${errorMessage}`);
@@ -157,9 +169,12 @@ const makeAIRequest = async (prompt, maxTokens = 1000, useFallback = false) => {
       throw error;
     }
 
-    if (!useFallback && error.name === 'TypeError') {
-      console.warn('Network error, trying fallback model...');
-      return makeAIRequest(prompt, maxTokens, true);
+    // Try next fallback on network errors
+    if (!isLastFallback && error.name === 'TypeError') {
+      const nextFallbackIndex = fallbackIndex + 1;
+      const nextModel = FALLBACK_MODELS[nextFallbackIndex];
+      console.warn(`Network error with ${model}, trying fallback: ${nextModel}...`);
+      return makeAIRequest(prompt, maxTokens, nextFallbackIndex);
     }
 
     console.error("OpenRouter API request failed:", error);
@@ -436,18 +451,18 @@ ${content.substring(0, 5000)}
   };
 
   // Helper to try parsing review
-  const tryParseReview = async (useFallbackModel = false) => {
-    const response = await makeAIRequest(prompt, 2500, useFallbackModel);
+  const tryParseReview = async (fallbackIndex = -1) => {
+    const response = await makeAIRequest(prompt, 2500, fallbackIndex);
     return safeJsonParse(response, null);
   };
 
   try {
-    let review = await tryParseReview(false);
+    let review = await tryParseReview(-1);
 
-    // Retry with fallback model if first attempt failed
+    // Retry with first fallback model if primary attempt returned invalid JSON
     if (!review || !review.structure) {
       console.warn('First review attempt failed, retrying with fallback model...');
-      review = await tryParseReview(true);
+      review = await tryParseReview(0);
     }
 
     if (!review || !review.structure) {
