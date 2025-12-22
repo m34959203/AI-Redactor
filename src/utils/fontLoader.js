@@ -4,18 +4,18 @@
  * Noto Serif has metrics similar to Times New Roman and full Cyrillic Extended support
  */
 
-// Primary: Noto Serif from MuPDF repository (Times-like, supports Kazakh Cyrillic)
+// Primary: Noto Serif from official Noto Fonts repository via jsDelivr CDN (supports Kazakh Cyrillic)
 const FONT_URLS = {
-  regular: 'https://raw.githubusercontent.com/ArtifexSoftware/mupdf/master/resources/fonts/noto/NotoSerif-Regular.ttf',
-  bold: 'https://raw.githubusercontent.com/ArtifexSoftware/mupdf/master/resources/fonts/noto/NotoSerif-Bold.ttf',
-  italic: 'https://raw.githubusercontent.com/ArtifexSoftware/mupdf/master/resources/fonts/noto/NotoSerif-Italic.ttf',
+  regular: 'https://cdn.jsdelivr.net/gh/notofonts/notofonts.github.io/fonts/NotoSerif/hinted/ttf/NotoSerif-Regular.ttf',
+  bold: 'https://cdn.jsdelivr.net/gh/notofonts/notofonts.github.io/fonts/NotoSerif/hinted/ttf/NotoSerif-Bold.ttf',
+  italic: 'https://cdn.jsdelivr.net/gh/notofonts/notofonts.github.io/fonts/NotoSerif/hinted/ttf/NotoSerif-Italic.ttf',
 };
 
-// Fallback to Noto Serif if primary not available
+// Fallback: Noto Serif from unhinted directory (smaller file size)
 const FALLBACK_URLS = {
-  regular: 'https://raw.githubusercontent.com/ArtifexSoftware/mupdf/master/resources/fonts/droid/DroidSerif-Regular.ttf',
-  bold: 'https://raw.githubusercontent.com/ArtifexSoftware/mupdf/master/resources/fonts/droid/DroidSerif-Bold.ttf',
-  italic: 'https://raw.githubusercontent.com/ArtifexSoftware/mupdf/master/resources/fonts/droid/DroidSerif-Italic.ttf',
+  regular: 'https://cdn.jsdelivr.net/gh/notofonts/notofonts.github.io/fonts/NotoSerif/unhinted/ttf/NotoSerif-Regular.ttf',
+  bold: 'https://cdn.jsdelivr.net/gh/notofonts/notofonts.github.io/fonts/NotoSerif/unhinted/ttf/NotoSerif-Bold.ttf',
+  italic: 'https://cdn.jsdelivr.net/gh/notofonts/notofonts.github.io/fonts/NotoSerif/unhinted/ttf/NotoSerif-Italic.ttf',
 };
 
 // Load Noto Serif web font for html2canvas rendering (supports Kazakh Cyrillic)
@@ -86,15 +86,15 @@ export const preloadFonts = async () => {
       loadFontFromUrl(FONT_URLS.italic),
     ]);
 
-    // Fallback to Droid Serif if Noto Serif failed
+    // Fallback to unhinted Noto Serif if hinted version failed
     if (!regular) {
-      console.warn('Noto Serif not available, trying Droid Serif fallback...');
+      console.warn('Hinted Noto Serif not available, trying unhinted fallback...');
       [regular, bold, italic] = await Promise.all([
         loadFontFromUrl(FALLBACK_URLS.regular),
         loadFontFromUrl(FALLBACK_URLS.bold),
         loadFontFromUrl(FALLBACK_URLS.italic),
       ]);
-      fontName = 'DroidSerif';
+      fontName = 'NotoSerif';
     } else {
       fontName = 'NotoSerif';
     }
