@@ -128,7 +128,8 @@ const App = () => {
 
         setProcessing(true, `[${fileNum}/${totalFiles}] AI анализ: ${file.name}`, currentStep, totalSteps);
         const metadata = await extractMetadataWithAI(file.name, content);
-        const language = detectLanguage(metadata.author);
+        // Определяем язык по названию статьи, с fallback на содержимое
+        const language = detectLanguage(metadata.title) || detectLanguage(content.substring(0, 500)) || 'cyrillic';
         currentStep++;
 
         setProcessing(true, `[${fileNum}/${totalFiles}] Определение раздела: ${file.name}`, currentStep, totalSteps);
@@ -174,8 +175,18 @@ const App = () => {
   // Article management
   const updateArticle = (id, field, value) => {
     const updates = { [field]: value };
+    // Пересчитываем язык при изменении названия (приоритет) или автора (fallback)
+    if (field === 'title') {
+      const article = articles.find(a => a.id === id);
+      updates.language = detectLanguage(value) || detectLanguage(article?.content?.substring(0, 500)) || 'cyrillic';
+    }
     if (field === 'author') {
-      updates.language = detectLanguage(value);
+      // Если язык ещё не определён по названию - пробуем по автору
+      const article = articles.find(a => a.id === id);
+      const currentLang = detectLanguage(article?.title);
+      if (!currentLang || currentLang === 'latin') {
+        updates.language = detectLanguage(value) || detectLanguage(article?.content?.substring(0, 500)) || 'cyrillic';
+      }
     }
     // When section is manually changed, mark as manually reviewed
     if (field === 'section') {
@@ -185,8 +196,8 @@ const App = () => {
     }
     actions.updateArticle(id, updates);
 
-    // Re-sort if author or section changed
-    if (field === 'author' || field === 'section') {
+    // Re-sort if title, author or section changed
+    if (field === 'title' || field === 'author' || field === 'section') {
       const updated = articles.map((a) =>
         a.id === id ? { ...a, ...updates } : a
       );

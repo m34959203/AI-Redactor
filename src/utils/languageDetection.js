@@ -12,6 +12,9 @@ import {
 // Kazakh-specific Cyrillic letters (not present in Russian)
 const KAZAKH_SPECIFIC = /[ӘәҒғҚқҢңӨөҰұҮүҺһІі]/;
 
+// Common Kazakh words that use standard Cyrillic but are distinctly Kazakh
+const KAZAKH_WORDS = /\b(және|бойынша|туралы|арқылы|қатысты|жүйесі|дамуы|бағыттары|мүмкіндіктері|саласында|жағдайы|қазіргі|еңбек|қорғау|білім|беру|жасанды|интеллект|қолдану|республикасы|қазақстан|мемлекет|тіл|ұлт|халық|ел|жер|су|от|ауа|күн|ай|жыл|адам|бала|ата|ана|әке|шеше|үй|қала|ауыл|жол|көше|дүние|әлем|өмір|тарих|мәдениет|ғылым|техника|экономика|саясат|құқық|заң|денсаулық|медицина|экология|табиғат)\b/i;
+
 // Standard Cyrillic (Russian and Kazakh share these)
 const CYRILLIC_PATTERN = /[а-яА-ЯёЁ]/;
 
@@ -27,14 +30,24 @@ const LATIN_PATTERN = /[a-zA-Z]/;
  * Detects the primary language/script of the text
  * Priority: Kazakh > Russian (Cyrillic) > English (Latin)
  *
+ * Improved algorithm:
+ * 1. Check for Kazakh-specific characters (Ә, Ғ, Қ, Ң, Ө, Ұ, Ү, Һ, І)
+ * 2. Check for common Kazakh words written in standard Cyrillic
+ * 3. Fall back to Cyrillic (Russian) or Latin (English)
+ *
  * @param {string} text - Text to analyze
- * @returns {LanguageCode} - Detected language code
+ * @returns {LanguageCode|null} - Detected language code or null if empty
  */
 export const detectLanguage = (text) => {
-  if (!text || typeof text !== 'string') return 'latin';
+  if (!text || typeof text !== 'string' || text.trim().length === 0) return null;
 
-  // Check for Kazakh-specific characters first
+  // Check for Kazakh-specific characters first (highest priority)
   if (KAZAKH_SPECIFIC.test(text)) {
+    return 'kazakh';
+  }
+
+  // Check for common Kazakh words (even without special characters)
+  if (KAZAKH_WORDS.test(text)) {
     return 'kazakh';
   }
 
@@ -43,8 +56,13 @@ export const detectLanguage = (text) => {
     return 'cyrillic';
   }
 
-  // Default to Latin (English)
-  return 'latin';
+  // Check for Latin (English)
+  if (LATIN_PATTERN.test(text)) {
+    return 'latin';
+  }
+
+  // Return null if no language detected (allows fallback logic)
+  return null;
 };
 
 /**
