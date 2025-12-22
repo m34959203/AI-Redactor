@@ -1,8 +1,8 @@
 import React from 'react';
-import { AlertCircle, X, Check, CheckCheck } from 'lucide-react';
+import { AlertCircle, X, Check, CheckCheck, FileText } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 
-const SpellCheckTab = ({ spellCheckResults }) => {
+const SpellCheckTab = ({ articles, spellCheckResults, onSpellCheck }) => {
   const { actions } = useApp();
 
   const handleFixError = (fileName, errorIndex, word, suggestion) => {
@@ -20,15 +20,55 @@ const SpellCheckTab = ({ spellCheckResults }) => {
     actions.showSuccess(`Исправлено ${errors.length} ошибок в файле "${result.fileName}"`);
   };
 
+  // Render article selection dropdown
+  const renderArticleSelector = () => (
+    <div className="border border-gray-200 rounded-xl p-6 mb-6">
+      <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+        <FileText className="text-indigo-600" size={20} />
+        Выберите статью для проверки орфографии
+      </h3>
+      {articles.length === 0 ? (
+        <div className="text-center py-6 text-gray-500">
+          <AlertCircle className="mx-auto mb-2 text-gray-400" size={32} />
+          <p>Сначала загрузите статьи во вкладке "Редактор"</p>
+        </div>
+      ) : (
+        <>
+          <select
+            onChange={(e) => {
+              const article = articles.find((a) => a.id.toString() === e.target.value);
+              if (article) onSpellCheck(article.content, article.file.name);
+            }}
+            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+            defaultValue=""
+          >
+            <option value="" disabled>
+              Выберите статью...
+            </option>
+            {articles.map((article) => (
+              <option key={article.id} value={article.id}>
+                {article.title} - {article.author}
+              </option>
+            ))}
+          </select>
+          <p className="text-sm text-gray-500 mt-2">
+            AI проверит орфографию на русском, казахском и английском языках
+          </p>
+        </>
+      )}
+    </div>
+  );
+
   if (spellCheckResults.length === 0) {
     return (
       <div className="bg-white rounded-2xl shadow-xl p-8">
         <h2 className="text-2xl font-bold mb-6 text-gray-800">
           Результаты проверки орфографии
         </h2>
+        {renderArticleSelector()}
         <div className="text-center py-12 text-gray-500">
           <AlertCircle className="mx-auto mb-4 text-gray-400" size={48} />
-          <p>Загрузите статьи для проверки орфографии</p>
+          <p>Выберите статью для проверки орфографии</p>
         </div>
       </div>
     );
@@ -39,6 +79,8 @@ const SpellCheckTab = ({ spellCheckResults }) => {
       <h2 className="text-2xl font-bold mb-6 text-gray-800">
         Результаты проверки орфографии
       </h2>
+
+      {renderArticleSelector()}
 
       <div className="space-y-6">
         {spellCheckResults.map((result, idx) => (

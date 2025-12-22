@@ -383,6 +383,25 @@ const App = () => {
     }
   };
 
+  // Spell check handler
+  const handleSpellCheck = async (content, fileName) => {
+    setProcessing(true, 'Проверка орфографии...');
+    try {
+      const result = await checkSpelling(content, fileName);
+      actions.addSpellCheckResults([result]);
+      if (result.totalErrors === 0) {
+        showSuccess(`Проверка завершена: ошибок не найдено в "${fileName}"`);
+      } else {
+        showSuccess(`Проверка завершена: найдено ${result.totalErrors} ошибок в "${fileName}"`);
+      }
+    } catch (error) {
+      console.error('Spell check error:', error);
+      showError('Ошибка при проверке орфографии: ' + error.message);
+    } finally {
+      setProcessing(false);
+    }
+  };
+
   // Retry classification for a single article
   const handleRetryClassification = async (articleId) => {
     const article = articles.find(a => a.id === articleId);
@@ -523,7 +542,11 @@ const App = () => {
         )}
 
         {activeTab === 'spellcheck' && (
-          <SpellCheckTab spellCheckResults={spellCheckResults} />
+          <SpellCheckTab
+            articles={articles}
+            spellCheckResults={spellCheckResults}
+            onSpellCheck={handleSpellCheck}
+          />
         )}
 
         {activeTab === 'review' && (
