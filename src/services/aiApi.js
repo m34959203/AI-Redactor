@@ -20,9 +20,11 @@ const FALLBACK_MODELS = [
   "google/gemma-3-12b-it:free"              // 128K context, lighter fallback
 ];
 
-// Rate limiting configuration
-const RATE_LIMIT_DELAY = 2000; // 2 seconds between requests
+// Rate limiting configuration - aggressive to avoid 429 errors
+const RATE_LIMIT_DELAY = 5000; // 5 seconds between requests (OpenRouter free tier limit)
+const RATE_LIMIT_DELAY_AFTER_429 = 15000; // 15 seconds after hitting rate limit
 let lastRequestTime = 0;
+let consecutiveErrors = 0;
 
 // System prompt for consistent AI behavior
 const SYSTEM_PROMPT = `Ты - эксперт-классификатор научных публикаций для академического журнала.
@@ -100,15 +102,34 @@ const extractJsonFromResponse = (response) => {
 
 /**
  * Rate limiting helper - waits if needed before making request
+ * Increases delay after consecutive errors
  */
 const waitForRateLimit = async () => {
   const now = Date.now();
+  // Use longer delay if we've had recent errors
+  const baseDelay = consecutiveErrors > 0 ? RATE_LIMIT_DELAY_AFTER_429 : RATE_LIMIT_DELAY;
   const timeSinceLastRequest = now - lastRequestTime;
-  if (timeSinceLastRequest < RATE_LIMIT_DELAY) {
-    const waitTime = RATE_LIMIT_DELAY - timeSinceLastRequest;
+
+  if (timeSinceLastRequest < baseDelay) {
+    const waitTime = baseDelay - timeSinceLastRequest;
+    console.log(`Rate limiting: waiting ${waitTime}ms before next request...`);
     await new Promise(resolve => setTimeout(resolve, waitTime));
   }
   lastRequestTime = Date.now();
+};
+
+/**
+ * Reset error counter on successful request
+ */
+const resetRateLimitErrors = () => {
+  consecutiveErrors = 0;
+};
+
+/**
+ * Increment error counter on rate limit
+ */
+const incrementRateLimitErrors = () => {
+  consecutiveErrors++;
 };
 
 /**
@@ -166,12 +187,19 @@ const makeAIRequest = async (prompt, maxTokens = 1000, fallbackIndex = -1, retry
         throw new Error("API_KEY_INVALID");
       }
 
-      // Handle rate limit with exponential backoff (up to 3 retries on same model)
-      if (response.status === 429 && retryCount < 3) {
-        const backoffTime = Math.pow(2, retryCount + 1) * 1000; // 2s, 4s, 8s
-        console.warn(`Rate limit hit on ${model}, waiting ${backoffTime}ms before retry ${retryCount + 1}...`);
+      // Handle rate limit with exponential backoff (up to 2 retries on same model)
+      if (response.status === 429 && retryCount < 2) {
+        incrementRateLimitErrors();
+        // Longer backoff: 10s, 20s
+        const backoffTime = Math.pow(2, retryCount + 1) * 5000;
+        console.warn(`Rate limit hit on ${model}, waiting ${backoffTime / 1000}s before retry ${retryCount + 1}...`);
         await new Promise(resolve => setTimeout(resolve, backoffTime));
         return makeAIRequest(prompt, maxTokens, fallbackIndex, retryCount + 1);
+      }
+
+      // Track rate limit errors
+      if (response.status === 429) {
+        incrementRateLimitErrors();
       }
 
       // Retry with next fallback on rate limit (after retries exhausted), server errors, or model not found (404)
@@ -179,7 +207,8 @@ const makeAIRequest = async (prompt, maxTokens = 1000, fallbackIndex = -1, retry
         const nextFallbackIndex = fallbackIndex + 1;
         const nextModel = FALLBACK_MODELS[nextFallbackIndex];
         console.warn(`Model ${model} failed (${response.status}), trying fallback: ${nextModel}...`);
-        // Reset retry count for new model
+        // Reset retry count for new model, wait extra time
+        await new Promise(resolve => setTimeout(resolve, 5000));
         return makeAIRequest(prompt, maxTokens, nextFallbackIndex, 0);
       }
 
@@ -192,6 +221,8 @@ const makeAIRequest = async (prompt, maxTokens = 1000, fallbackIndex = -1, retry
       throw new Error('Invalid API response structure');
     }
 
+    // Success! Reset error counter
+    resetRateLimitErrors();
     return data.choices[0].message.content;
   } catch (error) {
     // Don't retry on auth errors
@@ -867,9 +898,9 @@ export const batchRetryClassification = async (articles, onProgress) => {
       });
     }
 
-    // Small delay between articles to avoid rate limiting
+    // Longer delay between articles to avoid rate limiting (OpenRouter free tier)
     if (i < articles.length - 1) {
-      await sleep(500);
+      await sleep(3000); // 3 seconds between articles
     }
   }
 
