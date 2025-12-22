@@ -42,6 +42,40 @@ try {
   console.error('Failed to create temp directory:', err);
 }
 
+/**
+ * Decode filename from latin1 to UTF-8
+ * Multer interprets filenames as latin1 by default, but browsers send UTF-8
+ * This causes Cyrillic filenames to be corrupted
+ * @param {string} filename - Original filename from multer
+ * @returns {string} - Properly decoded UTF-8 filename
+ */
+function decodeFilename(filename) {
+  if (!filename) return filename;
+  try {
+    // Convert latin1 string back to bytes, then decode as UTF-8
+    return Buffer.from(filename, 'latin1').toString('utf8');
+  } catch {
+    return filename;
+  }
+}
+
+/**
+ * Check if LibreOffice is available
+ */
+async function checkLibreOffice() {
+  try {
+    await execAsync('libreoffice --version');
+    return true;
+  } catch {
+    try {
+      await execAsync('soffice --version');
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
 // Middleware
 app.use(cors());
 app.use(express.json({ limit: '100mb' }));
@@ -89,44 +123,15 @@ app.use((req, res, next) => {
 });
 
 // Early health check (before all other routes)
-app.get('/api/health', (req, res) => {
+app.get('/api/health', async (req, res) => {
   console.log('Health check requested');
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  const libreOfficeAvailable = await checkLibreOffice();
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    libreOffice: libreOfficeAvailable
+  });
 });
-
-/**
- * Decode filename from latin1 to UTF-8
- * Multer interprets filenames as latin1 by default, but browsers send UTF-8
- * This causes Cyrillic filenames to be corrupted
- * @param {string} filename - Original filename from multer
- * @returns {string} - Properly decoded UTF-8 filename
- */
-function decodeFilename(filename) {
-  if (!filename) return filename;
-  try {
-    // Convert latin1 string back to bytes, then decode as UTF-8
-    return Buffer.from(filename, 'latin1').toString('utf8');
-  } catch {
-    return filename;
-  }
-}
-
-/**
- * Check if LibreOffice is available
- */
-async function checkLibreOffice() {
-  try {
-    await execAsync('libreoffice --version');
-    return true;
-  } catch {
-    try {
-      await execAsync('soffice --version');
-      return true;
-    } catch {
-      return false;
-    }
-  }
-}
 
 /**
  * Convert DOCX to PDF using LibreOffice
