@@ -97,24 +97,25 @@ const App = () => {
   // Articles upload handler - fast local processing with optional AI enhancement
   const handleArticlesUpload = async (files) => {
     const totalFiles = files.length;
-    // 2 steps per file: read + local parse, then optional AI
-    const totalSteps = totalFiles * 2;
     let currentStep = 0;
-    setProcessing(true, 'Загрузка статей...', currentStep, totalSteps);
+    setProcessing(true, 'Загрузка статей...', currentStep, totalFiles);
     const newArticles = [];
     let aiAvailable = true; // Track if AI is working
+    let rateLimitShown = false; // Show rate limit message only once
 
     try {
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
         const fileNum = i + 1;
 
-        setProcessing(true, `[${fileNum}/${totalFiles}] Чтение: ${file.name}`, currentStep, totalSteps);
+        // Show appropriate status based on AI availability
+        const modeLabel = aiAvailable ? '🤖 AI' : '📄 Локально';
+        setProcessing(true, `${modeLabel} [${fileNum}/${totalFiles}] ${file.name}`, currentStep, totalFiles);
 
         const validation = validateArticleFile(file);
         if (!validation.valid) {
           console.warn(`Skipping file ${file.name}: ${validation.error}`);
-          currentStep += 2;
+          currentStep++;
           continue;
         }
 
@@ -137,42 +138,52 @@ const App = () => {
           reasoning: 'Требуется классификация'
         };
 
-        currentStep++;
-
         // Step 3: Try AI enhancement only if still available
         if (aiAvailable) {
-          setProcessing(true, `[${fileNum}/${totalFiles}] AI анализ: ${file.name}`, currentStep, totalSteps);
+          // Helper to handle rate limit errors
+          const handleRateLimitError = (error) => {
+            if (error.message?.startsWith('RATE_LIMIT_DAILY|') || error.message?.startsWith('RATE_LIMIT|')) {
+              const [, message, suggestion] = error.message.split('|');
+              aiAvailable = false;
+              if (!rateLimitShown) {
+                rateLimitShown = true;
+                showError(`${message}\n${suggestion}\n\n⏩ Продолжаю загрузку в локальном режиме...`);
+              }
+              return true; // Rate limit detected
+            } else if (error.message?.includes('Rate limit') || error.message?.includes('429')) {
+              aiAvailable = false;
+              if (!rateLimitShown) {
+                rateLimitShown = true;
+                showError('⚠️ Лимит API исчерпан\n⏩ Продолжаю загрузку в локальном режиме...');
+              }
+              return true; // Rate limit detected
+            }
+            return false; // Not a rate limit error
+          };
 
+          // Try AI metadata extraction
           try {
-            // Try AI metadata extraction
             const aiMetadata = await extractMetadataWithAI(file.name, content);
-            // Use AI metadata if it looks valid
             if (aiMetadata.title && aiMetadata.title !== file.name.replace('.docx', '').replace(/_/g, ' ')) {
               metadata = aiMetadata;
             }
-
-            // Try AI section detection
-            const aiSection = await detectArticleSection(content, metadata.title);
-            if (aiSection.section !== NEEDS_REVIEW_SECTION) {
-              sectionResult = aiSection;
-            }
           } catch (error) {
-            // Parse rate limit errors for user-friendly messages
-            if (error.message?.startsWith('RATE_LIMIT_DAILY|')) {
-              const [, message, suggestion] = error.message.split('|');
-              console.warn('Daily limit reached:', message);
-              showError(`${message}\n${suggestion}`);
-              aiAvailable = false;
-            } else if (error.message?.startsWith('RATE_LIMIT|')) {
-              const [, message, suggestion] = error.message.split('|');
-              console.warn('Rate limit:', message);
-              showError(`${message}\n${suggestion}`);
-              aiAvailable = false;
-            } else if (error.message?.includes('Rate limit') || error.message?.includes('429')) {
-              console.warn('AI rate limited, switching to local-only mode');
-              aiAvailable = false;
-            } else {
-              console.warn('AI error, using local metadata:', error.message);
+            if (!handleRateLimitError(error)) {
+              console.warn('AI metadata error:', error.message);
+            }
+          }
+
+          // Try AI section detection only if AI still available
+          if (aiAvailable) {
+            try {
+              const aiSection = await detectArticleSection(content, metadata.title);
+              if (aiSection.section !== NEEDS_REVIEW_SECTION) {
+                sectionResult = aiSection;
+              }
+            } catch (error) {
+              if (!handleRateLimitError(error)) {
+                console.warn('AI section error:', error.message);
+              }
             }
           }
         }
@@ -193,7 +204,7 @@ const App = () => {
           needsReview: sectionResult.needsReview,
           sectionReasoning: sectionResult.reasoning,
           content,
-          aiProcessed: aiAvailable, // Track if AI was used
+          aiProcessed: !rateLimitShown && aiAvailable, // Track if AI was used for this article
         };
 
         newArticles.push(article);
@@ -206,7 +217,10 @@ const App = () => {
 
       // Show appropriate message based on AI availability
       const needsClassification = newArticles.filter(a => a.needsReview).length;
-      if (needsClassification > 0) {
+      if (rateLimitShown) {
+        // User already saw rate limit message, just confirm upload
+        showSuccess(`✅ Загружено ${newArticles.length} статей (локальный режим)\n📋 ${needsClassification} требуют классификации`);
+      } else if (needsClassification > 0) {
         showSuccess(`Загружено ${newArticles.length} статей. ${needsClassification} требуют классификации (нажмите "Повторить анализ")`);
       } else {
         showSuccess(`Загружено ${newArticles.length} статей`);
