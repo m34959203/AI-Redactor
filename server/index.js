@@ -1117,7 +1117,7 @@ app.post('/api/convert-base64', async (req, res) => {
 });
 
 // Serve static files in production (frontend build)
-const PUBLIC_DIR = path.join(__dirname, '..', 'public');
+const PUBLIC_DIR = path.join(__dirname, 'public');
 try {
   await fs.access(PUBLIC_DIR);
   app.use(express.static(PUBLIC_DIR));
