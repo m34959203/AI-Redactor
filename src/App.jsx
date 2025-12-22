@@ -109,7 +109,7 @@ const App = () => {
         const fileNum = i + 1;
 
         // Show appropriate status based on AI availability
-        const modeLabel = aiAvailable ? '🤖 AI' : '📄 Локально';
+        const modeLabel = aiAvailable ? 'AI' : 'Локально';
         setProcessing(true, `${modeLabel} [${fileNum}/${totalFiles}] ${file.name}`, currentStep, totalFiles);
 
         const validation = validateArticleFile(file);
