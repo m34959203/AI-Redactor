@@ -157,9 +157,19 @@ const App = () => {
               sectionResult = aiSection;
             }
           } catch (error) {
-            // Check if it's a rate limit error
-            if (error.message?.includes('Rate limit') || error.message?.includes('429')) {
-              console.warn('AI rate limited, switching to local-only mode for remaining files');
+            // Parse rate limit errors for user-friendly messages
+            if (error.message?.startsWith('RATE_LIMIT_DAILY|')) {
+              const [, message, suggestion] = error.message.split('|');
+              console.warn('Daily limit reached:', message);
+              showError(`${message}\n${suggestion}`);
+              aiAvailable = false;
+            } else if (error.message?.startsWith('RATE_LIMIT|')) {
+              const [, message, suggestion] = error.message.split('|');
+              console.warn('Rate limit:', message);
+              showError(`${message}\n${suggestion}`);
+              aiAvailable = false;
+            } else if (error.message?.includes('Rate limit') || error.message?.includes('429')) {
+              console.warn('AI rate limited, switching to local-only mode');
               aiAvailable = false;
             } else {
               console.warn('AI error, using local metadata:', error.message);
