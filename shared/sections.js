@@ -29,20 +29,18 @@ export const NEEDS_REVIEW_SECTION = 'ТРЕБУЕТ КЛАССИФИКАЦИИ';
 /**
  * Check if a section name is valid for PDF generation
  * @param {string} section - Section name to validate
- * @returns {boolean} - True if section is valid
+ * @returns {boolean}
  */
-export function isValidSection(section) {
+export const isValidSection = (section) => {
   return ARTICLE_SECTIONS.includes(section);
-}
+};
 
 /**
- * Get the display name for a section
+ * Get section priority for sorting
  * @param {string} section - Section name
- * @returns {string} - Display name or original if not found
+ * @returns {number} - Sort priority (lower = first)
  */
-export function getSectionDisplayName(section) {
-  if (section === NEEDS_REVIEW_SECTION) {
-    return 'Требует классификации';
-  }
-  return section;
-}
+export const getSectionPriority = (section) => {
+  const index = SECTION_ORDER.indexOf(section);
+  return index >= 0 ? index : SECTION_ORDER.length;
+};
