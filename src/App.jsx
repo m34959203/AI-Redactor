@@ -18,6 +18,7 @@ import { CONFIDENCE_THRESHOLDS } from './constants/sections';
 import { validatePdfRequirements, createIssue, generatePDF, generatePDFSmart, downloadPDF } from './utils/pdfGenerator';
 import { convertDocxToText } from './utils/docxConverter';
 import { addToArchive, getPdfBlob, removeFromArchive } from './utils/archiveStorage';
+import { extractMetadataLocal } from './utils/localMetadataParser';
 
 const App = () => {
   const { state, actions } = useApp();
@@ -93,15 +94,15 @@ const App = () => {
     }
   };
 
-  // Articles upload handler
+  // Articles upload handler - fast local processing with optional AI enhancement
   const handleArticlesUpload = async (files) => {
     const totalFiles = files.length;
-    // 4 steps per file: read, AI metadata, AI section, spell check
-    const totalSteps = totalFiles * 4;
+    // 2 steps per file: read + local parse, then optional AI
+    const totalSteps = totalFiles * 2;
     let currentStep = 0;
     setProcessing(true, 'Загрузка статей...', currentStep, totalSteps);
     const newArticles = [];
-    const spellChecks = [];
+    let aiAvailable = true; // Track if AI is working
 
     try {
       for (let i = 0; i < files.length; i++) {
@@ -113,10 +114,11 @@ const App = () => {
         const validation = validateArticleFile(file);
         if (!validation.valid) {
           console.warn(`Skipping file ${file.name}: ${validation.error}`);
-          currentStep += 4; // Skip all 4 steps for this file
+          currentStep += 2;
           continue;
         }
 
+        // Step 1: Read file content
         let content;
         try {
           content = await convertDocxToText(file);
@@ -124,17 +126,51 @@ const App = () => {
           console.error('Error extracting text:', error);
           content = await file.text();
         }
+
+        // Step 2: Local metadata extraction (always works, fast)
+        const localMetadata = extractMetadataLocal(file.name, content);
+        let metadata = localMetadata;
+        let sectionResult = {
+          section: NEEDS_REVIEW_SECTION,
+          confidence: 0,
+          needsReview: true,
+          reasoning: 'Требуется классификация'
+        };
+
         currentStep++;
 
-        setProcessing(true, `[${fileNum}/${totalFiles}] AI анализ: ${file.name}`, currentStep, totalSteps);
-        const metadata = await extractMetadataWithAI(file.name, content);
-        // Определяем язык по названию статьи, с fallback на содержимое
+        // Step 3: Try AI enhancement only if still available
+        if (aiAvailable) {
+          setProcessing(true, `[${fileNum}/${totalFiles}] AI анализ: ${file.name}`, currentStep, totalSteps);
+
+          try {
+            // Try AI metadata extraction
+            const aiMetadata = await extractMetadataWithAI(file.name, content);
+            // Use AI metadata if it looks valid
+            if (aiMetadata.title && aiMetadata.title !== file.name.replace('.docx', '').replace(/_/g, ' ')) {
+              metadata = aiMetadata;
+            }
+
+            // Try AI section detection
+            const aiSection = await detectArticleSection(content, metadata.title);
+            if (aiSection.section !== NEEDS_REVIEW_SECTION) {
+              sectionResult = aiSection;
+            }
+          } catch (error) {
+            // Check if it's a rate limit error
+            if (error.message?.includes('Rate limit') || error.message?.includes('429')) {
+              console.warn('AI rate limited, switching to local-only mode for remaining files');
+              aiAvailable = false;
+            } else {
+              console.warn('AI error, using local metadata:', error.message);
+            }
+          }
+        }
+
+        currentStep++;
+
+        // Determine language from title (priority) or content
         const language = detectLanguage(metadata.title) || detectLanguage(content.substring(0, 500)) || 'cyrillic';
-        currentStep++;
-
-        setProcessing(true, `[${fileNum}/${totalFiles}] Определение раздела: ${file.name}`, currentStep, totalSteps);
-        const sectionResult = await detectArticleSection(content, metadata.title);
-        currentStep++;
 
         const article = {
           id: Date.now() + Math.random(),
@@ -147,23 +183,24 @@ const App = () => {
           needsReview: sectionResult.needsReview,
           sectionReasoning: sectionResult.reasoning,
           content,
+          aiProcessed: aiAvailable, // Track if AI was used
         };
 
         newArticles.push(article);
-
-        setProcessing(true, `[${fileNum}/${totalFiles}] Орфография: ${file.name}`, currentStep, totalSteps);
-        const spellCheck = await checkSpelling(content, file.name);
-        spellChecks.push(spellCheck);
-        currentStep++;
       }
 
       const allArticles = [...articles, ...newArticles];
       const sortedArticles = sortArticlesBySectionAndLanguage(allArticles);
 
       actions.setArticles(sortedArticles);
-      actions.addSpellCheckResults(spellChecks);
 
-      showSuccess(`Загружено ${newArticles.length} статей`);
+      // Show appropriate message based on AI availability
+      const needsClassification = newArticles.filter(a => a.needsReview).length;
+      if (needsClassification > 0) {
+        showSuccess(`Загружено ${newArticles.length} статей. ${needsClassification} требуют классификации (нажмите "Повторить анализ")`);
+      } else {
+        showSuccess(`Загружено ${newArticles.length} статей`);
+      }
     } catch (error) {
       console.error('Error uploading articles:', error);
       showError('Ошибка при загрузке статей: ' + error.message);
