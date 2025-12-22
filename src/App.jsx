@@ -215,15 +215,63 @@ const App = () => {
 
       actions.setArticles(sortedArticles);
 
-      // Show appropriate message based on AI availability
-      const needsClassification = newArticles.filter(a => a.needsReview).length;
-      if (rateLimitShown) {
-        // User already saw rate limit message, just confirm upload
-        showSuccess(`✅ Загружено ${newArticles.length} статей (локальный режим)\n📋 ${needsClassification} требуют классификации`);
-      } else if (needsClassification > 0) {
-        showSuccess(`Загружено ${newArticles.length} статей. ${needsClassification} требуют классификации (нажмите "Повторить анализ")`);
+      // Автоматическая проверка орфографии для загруженных статей
+      if (newArticles.length > 0 && aiAvailable) {
+        setProcessing(true, 'Проверка орфографии...', 0, newArticles.length);
+        const spellCheckResults = [];
+        let spellCheckErrors = 0;
+
+        for (let i = 0; i < newArticles.length; i++) {
+          const article = newArticles[i];
+          setProcessing(true, `📝 Проверка орфографии [${i + 1}/${newArticles.length}] ${article.title.substring(0, 30)}...`, i, newArticles.length);
+
+          try {
+            const result = await checkSpelling(article.content, article.file.name);
+            spellCheckResults.push(result);
+            spellCheckErrors += result.totalErrors;
+          } catch (error) {
+            // Если rate limit - прекращаем проверку орфографии
+            if (error.message?.includes('Rate limit') || error.message?.includes('429') ||
+                error.message?.startsWith('RATE_LIMIT')) {
+              console.warn('Spell check stopped due to rate limit');
+              break;
+            }
+            console.warn(`Spell check failed for ${article.file.name}:`, error.message);
+          }
+        }
+
+        // Сохраняем результаты проверки орфографии
+        if (spellCheckResults.length > 0) {
+          actions.addSpellCheckResults(spellCheckResults);
+        }
+
+        // Формируем итоговое сообщение
+        const needsClassification = newArticles.filter(a => a.needsReview).length;
+        let message = `✅ Загружено ${newArticles.length} статей`;
+
+        if (spellCheckResults.length > 0) {
+          if (spellCheckErrors > 0) {
+            message += `\n📝 Найдено ${spellCheckErrors} орфографических ошибок`;
+          } else {
+            message += `\n📝 Орфографических ошибок не найдено`;
+          }
+        }
+
+        if (needsClassification > 0) {
+          message += `\n📋 ${needsClassification} требуют классификации`;
+        }
+
+        showSuccess(message);
       } else {
-        showSuccess(`Загружено ${newArticles.length} статей`);
+        // Если AI недоступен - показываем только информацию о загрузке
+        const needsClassification = newArticles.filter(a => a.needsReview).length;
+        if (rateLimitShown) {
+          showSuccess(`✅ Загружено ${newArticles.length} статей (локальный режим)\n📋 ${needsClassification} требуют классификации`);
+        } else if (needsClassification > 0) {
+          showSuccess(`Загружено ${newArticles.length} статей. ${needsClassification} требуют классификации (нажмите "Повторить анализ")`);
+        } else {
+          showSuccess(`Загружено ${newArticles.length} статей`);
+        }
       }
     } catch (error) {
       console.error('Error uploading articles:', error);
