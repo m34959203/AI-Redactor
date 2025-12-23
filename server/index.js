@@ -23,6 +23,8 @@ import {
 } from '../shared/sections.js';
 import aiRoutes from './routes/ai.js';
 import dataRoutes from './routes/data.js';
+import webhookRoutes from './routes/webhooks.js';
+import socialMediaRoutes from './routes/socialMedia.js';
 import { testConnection } from './db/config.js';
 import { runMigrations, isDatabaseReady } from './db/migrate.js';
 
@@ -149,6 +151,13 @@ app.use('/api/ai', aiRoutes);
 
 // Data Routes (articles, sessions, archive - requires database)
 app.use('/api/data', dataRoutes);
+
+// Webhook Routes (Instagram, Telegram, etc.)
+// Note: Webhook POST route uses raw body parser for signature verification
+app.use('/api/webhooks', webhookRoutes);
+
+// Social Media Routes (admin settings for social platforms)
+app.use('/api/social-media', socialMediaRoutes);
 
 /**
  * Convert DOCX to PDF using LibreOffice
@@ -1177,6 +1186,8 @@ app.listen(PORT, async () => {
   console.log('  POST /api/convert-base64   - Convert DOCX to PDF (base64)');
   console.log('  POST /api/generate-journal - Generate journal from multiple files');
   console.log('  /api/data/*                - Data persistence (articles, archive)');
+  console.log('  /api/social-media/*        - Social media integrations (Instagram, etc.)');
+  console.log('  /api/webhooks/*            - Webhook endpoints for social platforms');
   console.log('');
 
   // Initialize database
