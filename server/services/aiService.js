@@ -3,6 +3,8 @@
  * Keeps API key secure on the backend
  */
 
+import crypto from 'crypto';
+
 // Rate limiting configuration
 const RATE_LIMIT_DELAY = 5000;
 const RATE_LIMIT_DELAY_AFTER_429 = 15000;
@@ -33,7 +35,6 @@ const CACHE_TTL = 30 * 60 * 1000; // 30 minutes
  * Generate cache key from content hash
  */
 const generateCacheKey = (taskType, content, additionalKey = '') => {
-  const crypto = require('crypto');
   const hash = crypto.createHash('md5').update(content.substring(0, 2000)).digest('hex');
   return `${taskType}:${hash}:${additionalKey}`;
 };
