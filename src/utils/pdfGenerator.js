@@ -5,7 +5,7 @@
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
 import { convertDocxToHtml, readFileAsArrayBuffer } from './docxConverter';
-import { registerCyrillicFont, getFontName, preloadFonts } from './fontLoader';
+import { registerCyrillicFont, getFontName, preloadFonts, getFontDiagnostics } from './fontLoader';
 import { checkServerHealth, generateJournalPdf } from './apiService';
 import { groupArticlesBySection, SECTION_ORDER } from './languageDetection';
 
@@ -78,14 +78,28 @@ export const createIssue = (articles, coverPage, descriptionPage, finalPage) => 
 /**
  * Adds Cyrillic font support to jsPDF
  * @param {jsPDF} doc - jsPDF instance
- * @returns {Promise<void>}
+ * @returns {Promise<{success: boolean, diagnostics: object}>}
  */
 const setupCyrillicFont = async (doc) => {
   const success = await registerCyrillicFont(doc);
+  const diagnostics = getFontDiagnostics();
+
+  console.log('=== Font Setup Diagnostics ===');
+  console.log('Registration success:', success);
+  console.log('Font name:', diagnostics.fontName);
+  console.log('Fonts loaded:', diagnostics.fontsLoaded);
+  console.log('Regular font size:', diagnostics.regularSize, 'base64 chars');
+
   if (!success) {
-    console.warn('Using fallback font (helvetica) - Cyrillic may not display correctly');
+    console.error('⚠️ FONT SETUP FAILED!');
+    console.error('Kazakh characters (Ә, Ғ, Қ, Ң, Ө, Ұ, Ү, Һ, І) will show as boxes.');
+    console.error('Using fallback font (helvetica) - Cyrillic may not display correctly');
     doc.setFont('helvetica');
+  } else {
+    console.log('✓ Cyrillic font registered successfully');
   }
+
+  return { success, diagnostics };
 };
 
 /**
@@ -888,7 +902,18 @@ export const generatePDF = async (issue, articles, coverPage, descriptionPage, f
 
   // Setup Cyrillic font support
   onProgress({ step: 0, total: 0, message: 'Загрузка шрифтов...' });
-  await setupCyrillicFont(doc);
+  const fontResult = await setupCyrillicFont(doc);
+
+  if (!fontResult.success) {
+    onProgress({
+      step: 0,
+      total: 0,
+      message: '⚠️ Внимание: шрифты не загружены. Казахские символы (Ә, Ғ, Қ, Ң, Ө, Ұ, Ү, І) могут отображаться как квадраты.',
+      warning: true
+    });
+    // Wait a bit so user sees the warning
+    await new Promise(resolve => setTimeout(resolve, 2000));
+  }
 
   let currentPage = 1;
   const tocEntries = [];

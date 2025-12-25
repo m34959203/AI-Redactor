@@ -76,19 +76,51 @@ const arrayBufferToBase64 = (buffer) => {
 
 /**
  * Loads font from URL and returns base64 string
+ * @param {string} url - Font URL
+ * @param {number} retries - Number of retry attempts
  */
-const loadFontFromUrl = async (url) => {
-  try {
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`Failed to load font: ${response.status}`);
+const loadFontFromUrl = async (url, retries = 2) => {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      console.log(`Loading font from: ${url} (attempt ${attempt + 1})`);
+
+      const response = await fetch(url, {
+        mode: 'cors',
+        cache: 'force-cache', // Cache the font for better performance
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const arrayBuffer = await response.arrayBuffer();
+
+      // Verify we got actual data (Noto Serif is ~700KB)
+      if (arrayBuffer.byteLength < 10000) {
+        throw new Error(`Font file too small: ${arrayBuffer.byteLength} bytes`);
+      }
+
+      console.log(`Font loaded successfully: ${arrayBuffer.byteLength} bytes`);
+      const base64 = arrayBufferToBase64(arrayBuffer);
+
+      // Verify base64 conversion
+      if (!base64 || base64.length < 10000) {
+        throw new Error(`Base64 conversion failed: ${base64?.length || 0} chars`);
+      }
+
+      return base64;
+    } catch (error) {
+      console.error(`Font load attempt ${attempt + 1} failed:`, url, error.message);
+
+      if (attempt < retries) {
+        // Wait before retry with exponential backoff
+        await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)));
+      }
     }
-    const arrayBuffer = await response.arrayBuffer();
-    return arrayBufferToBase64(arrayBuffer);
-  } catch (error) {
-    console.error('Error loading font from:', url, error);
-    return null;
   }
+
+  console.error('All font load attempts failed for:', url);
+  return null;
 };
 
 /**
@@ -136,9 +168,16 @@ export const preloadFonts = async () => {
     fontsLoaded = regular !== null;
 
     console.log('Cyrillic fonts loaded:', fontsLoaded, 'Font:', fontName);
+
     if (fontsLoaded) {
       console.log('Kazakh characters (Ә, Ғ, Қ, Ң, Ө, Ұ, Ү, І) should now be supported');
+      console.log(`Font data sizes - Regular: ${regular?.length || 0}, Bold: ${bold?.length || 0}, Italic: ${italic?.length || 0}`);
+    } else {
+      console.error('⚠️ WARNING: Fonts failed to load!');
+      console.error('Kazakh characters will display as boxes (□) in the PDF.');
+      console.error('Please check network connectivity and CORS settings.');
     }
+
     return fontsLoaded;
   } catch (error) {
     console.error('Failed to preload fonts:', error);
@@ -201,3 +240,45 @@ export const getFontName = () => {
  * Checks if Cyrillic fonts are loaded
  */
 export const areFontsLoaded = () => fontsLoaded;
+
+/**
+ * Get font loading diagnostics for debugging
+ */
+export const getFontDiagnostics = () => {
+  return {
+    fontsLoaded,
+    fontName,
+    hasRegular: !!fontData.regular,
+    hasBold: !!fontData.bold,
+    hasItalic: !!fontData.italic,
+    regularSize: fontData.regular?.length || 0,
+    boldSize: fontData.bold?.length || 0,
+    italicSize: fontData.italic?.length || 0,
+  };
+};
+
+/**
+ * Test if font can render Kazakh characters
+ * Call this after fonts are loaded to verify support
+ */
+export const testKazakhSupport = () => {
+  const kazakhChars = 'ӘәҒғҚқҢңӨөҰұҮүҺһІі';
+  const diagnostics = getFontDiagnostics();
+
+  console.log('=== Kazakh Font Support Test ===');
+  console.log('Font loaded:', diagnostics.fontsLoaded);
+  console.log('Font name:', diagnostics.fontName);
+  console.log('Regular font size:', diagnostics.regularSize, 'chars');
+
+  if (!diagnostics.fontsLoaded) {
+    console.error('❌ Fonts not loaded - Kazakh characters will show as boxes');
+    return false;
+  }
+
+  if (diagnostics.regularSize < 100000) {
+    console.warn('⚠️ Font might be subset - Kazakh support uncertain');
+  }
+
+  console.log('✓ Font loaded, Kazakh characters should be supported:', kazakhChars);
+  return true;
+};
