@@ -6,30 +6,33 @@
 // ============ BATCH PROCESSING ============
 export const BATCH_CONFIG = {
   // Maximum articles per batch request
-  BATCH_SIZE: 5,
+  // Reduced from 5 to 3 to avoid hitting 12000 TPM limit
+  BATCH_SIZE: 3,
 
   // Maximum characters to send per article (prevents token overflow)
-  MAX_CHARS_PER_ARTICLE: 1500,
+  // Reduced from 1500 to 1200 for safer TPM margins
+  MAX_CHARS_PER_ARTICLE: 1200,
 
   // Maximum tokens for batch response
-  MAX_TOKENS_BATCH: 2000,
+  MAX_TOKENS_BATCH: 1500,
 
   // Maximum tokens for single analysis
-  MAX_TOKENS_SINGLE: 1000
+  MAX_TOKENS_SINGLE: 800
 };
 
 // ============ RATE LIMITING ============
 export const RATE_LIMIT_CONFIG = {
   // Delay between requests (ms)
-  GROQ_DELAY: 2000,           // 30 req/min = 2s between requests
+  // Increased to 4s to allow TPM quota recovery (12000 TPM limit)
+  GROQ_DELAY: 4000,           // 30 req/min but TPM limited, use 4s for safety
   OPENROUTER_DELAY: 5000,     // 20 req/min = 3s, but we use 5s for safety
 
-  // Delay after hitting rate limit
-  DELAY_AFTER_429: 10000,
+  // Delay after hitting rate limit (increased for TPM recovery)
+  DELAY_AFTER_429: 15000,
 
   // Retry configuration
-  MAX_RETRIES: 2,
-  BACKOFF_MULTIPLIER: 3000    // exponential backoff base
+  MAX_RETRIES: 3,
+  BACKOFF_MULTIPLIER: 4000    // exponential backoff base (increased)
 };
 
 // ============ CACHE ============
@@ -45,9 +48,11 @@ export const PROVIDERS = {
     name: 'Groq',
     url: 'https://api.groq.com/openai/v1/chat/completions',
     model: 'llama-3.3-70b-versatile',
-    fallbackModels: ['mixtral-8x7b-32768', 'llama-3.1-8b-instant'],
+    // Updated fallback models - mixtral deprecated Dec 2024
+    fallbackModels: ['llama-3.1-70b-versatile', 'gemma2-9b-it'],
     keyEnv: 'GROQ_API_KEY',
-    rateLimit: { requestsPerMin: 30, tokensPerMin: 15000 },
+    // Free tier: 12000 TPM for 70b, need longer delays
+    rateLimit: { requestsPerMin: 30, tokensPerMin: 12000 },
     headers: (apiKey) => ({
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${apiKey}`
