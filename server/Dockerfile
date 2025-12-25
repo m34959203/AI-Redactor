@@ -2,12 +2,15 @@
 FROM node:20-slim
 
 # Install LibreOffice and PDF tools
+# fonts-noto and fonts-noto-core include full Cyrillic Extended support (Kazakh: Ә, Ғ, Қ, Ң, Ө, Ұ, Ү, Һ, І)
 RUN apt-get update && apt-get install -y \
     libreoffice \
     poppler-utils \
     fonts-liberation \
     fonts-dejavu \
     fonts-freefont-ttf \
+    fonts-noto \
+    fonts-noto-core \
     && rm -rf /var/lib/apt/lists/*
 
 # Create app directory
