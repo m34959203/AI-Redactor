@@ -55,13 +55,53 @@ export const extractTitleLocal = (content, fileName) => {
 };
 
 /**
+ * Extracts author from filename
+ * Patterns: "Статья Калжанова Г.М. ЖГК.docx", "Статья_Иванов_А.Б.docx"
+ *
+ * @param {string} fileName - Original file name
+ * @returns {string|null} - Extracted author or null
+ */
+const extractAuthorFromFileName = (fileName) => {
+  if (!fileName) return null;
+
+  // Remove extension and common prefixes
+  const cleanName = fileName
+    .replace(/\.docx?$/i, '')
+    .replace(/^(статья|article|ст\.?)\s*/i, '')
+    .replace(/[_]+/g, ' ')
+    .trim();
+
+  // Pattern: "Фамилия И.О." in filename (Калжанова Г.М., Нығызбаева П.Т.)
+  const pattern1 = /([А-ЯӘҒҚҢӨҰҮҺІЁа-яәғқңөұүһіёA-Za-z]+)\s+([А-ЯӘҒҚҢӨҰҮҺІЁа-яәғқңөұүһіёA-Za-z])\s*\.\s*([А-ЯӘҒҚҢӨҰҮҺІЁа-яәғқңөұүһіёA-Za-z])\s*\./;
+  const match1 = cleanName.match(pattern1);
+  if (match1) {
+    return `${match1[1]} ${match1[2]}.${match1[3]}.`;
+  }
+
+  // Pattern: "соавторы Фамилия1, Фамилия2" - take first
+  const coauthorMatch = cleanName.match(/соавторы?\s+([А-ЯӘҒҚҢӨҰҮҺІЁа-яәғқңөұүһіё]+)/i);
+  if (coauthorMatch) {
+    return coauthorMatch[1];
+  }
+
+  return null;
+};
+
+/**
  * Extracts author from content
  * Looks for patterns like "Иванов И.И." or "И.И. Иванов"
  *
  * @param {string} content - Article content
+ * @param {string} fileName - Original file name (for fallback)
  * @returns {string} - Extracted author or placeholder
  */
-export const extractAuthorLocal = (content) => {
+export const extractAuthorLocal = (content, fileName = '') => {
+  // First, try to extract from filename
+  const fileNameAuthor = extractAuthorFromFileName(fileName);
+  if (fileNameAuthor) {
+    return fileNameAuthor;
+  }
+
   if (!content || typeof content !== 'string') {
     return 'Автор не указан';
   }
@@ -117,7 +157,7 @@ export const extractAuthorLocal = (content) => {
 export const extractMetadataLocal = (fileName, content) => {
   return {
     title: extractTitleLocal(content, fileName),
-    author: extractAuthorLocal(content)
+    author: extractAuthorLocal(content, fileName)
   };
 };
 
