@@ -274,11 +274,60 @@ async function addPageNumbers(pdfBuffer, startPage = 2) {
 
 /**
  * Load Cyrillic font for PDF generation
- * Tries system fonts first, then falls back to embedded font
+ * Tries Noto Serif first (full Kazakh support), then Liberation Serif, then DejaVu
  * @returns {Promise<{regular: Buffer, bold: Buffer}|null>} - Font buffers or null if not found
  */
 async function loadCyrillicFont() {
-  // Try Liberation Serif first (best Cyrillic support)
+  // Try Noto Serif first (best Cyrillic Extended support - includes Kazakh: Ә, Ғ, Қ, Ң, Ө, Ұ, Ү, Һ, І)
+  const notoPaths = [
+    // Common paths for Noto Serif on Debian/Ubuntu
+    {
+      regular: '/usr/share/fonts/truetype/noto/NotoSerif-Regular.ttf',
+      bold: '/usr/share/fonts/truetype/noto/NotoSerif-Bold.ttf'
+    },
+    {
+      regular: '/usr/share/fonts/noto/NotoSerif-Regular.ttf',
+      bold: '/usr/share/fonts/noto/NotoSerif-Bold.ttf'
+    },
+    {
+      regular: '/usr/share/fonts/opentype/noto/NotoSerif-Regular.ttf',
+      bold: '/usr/share/fonts/opentype/noto/NotoSerif-Bold.ttf'
+    }
+  ];
+
+  for (const paths of notoPaths) {
+    try {
+      const regular = await fs.readFile(paths.regular);
+      const bold = await fs.readFile(paths.bold);
+      console.log('✓ Loaded Noto Serif font with full Kazakh Cyrillic support');
+      return { regular, bold };
+    } catch {
+      // Try next path
+    }
+  }
+
+  // Try Noto Sans as fallback (also has Kazakh support)
+  const notoSansPaths = [
+    {
+      regular: '/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf',
+      bold: '/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf'
+    }
+  ];
+
+  for (const paths of notoSansPaths) {
+    try {
+      const regular = await fs.readFile(paths.regular);
+      const bold = await fs.readFile(paths.bold);
+      console.log('✓ Loaded Noto Sans font with Kazakh Cyrillic support');
+      return { regular, bold };
+    } catch {
+      // Try next path
+    }
+  }
+
+  console.log('Noto fonts not found, trying Liberation Serif...');
+
+  // Fallback to Liberation Serif (Russian Cyrillic only, no Kazakh)
   const liberationPaths = {
     regular: '/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf',
     bold: '/usr/share/fonts/truetype/liberation/LiberationSerif-Bold.ttf'
@@ -287,7 +336,7 @@ async function loadCyrillicFont() {
   try {
     const regular = await fs.readFile(liberationPaths.regular);
     const bold = await fs.readFile(liberationPaths.bold);
-    console.log('Loaded Liberation Serif font with Cyrillic support');
+    console.log('⚠️ Loaded Liberation Serif - Russian only, Kazakh may show as boxes');
     return { regular, bold };
   } catch {
     console.log('Liberation Serif not found, trying DejaVu...');
@@ -303,7 +352,7 @@ async function loadCyrillicFont() {
   for (const fontPath of dejavuPaths) {
     try {
       const fontBuffer = await fs.readFile(fontPath);
-      console.log(`Loaded DejaVu Sans font: ${fontPath}`);
+      console.log(`⚠️ Loaded DejaVu Sans - Kazakh may show as boxes: ${fontPath}`);
       return { regular: fontBuffer, bold: fontBuffer };
     } catch {
       // Try next font
@@ -313,13 +362,13 @@ async function loadCyrillicFont() {
   // Try FreeSans
   try {
     const fontBuffer = await fs.readFile('/usr/share/fonts/truetype/freefont/FreeSans.ttf');
-    console.log('Loaded FreeSans font');
+    console.log('⚠️ Loaded FreeSans - Kazakh may show as boxes');
     return { regular: fontBuffer, bold: fontBuffer };
   } catch {
     // Continue
   }
 
-  console.warn('No Cyrillic font found, Table of Contents will use Latin fallback');
+  console.error('❌ No Cyrillic font found! Install fonts-noto for Kazakh support.');
   return null;
 }
 
