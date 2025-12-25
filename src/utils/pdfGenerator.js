@@ -771,6 +771,22 @@ const generateTableOfContents = (doc, tocEntries, startPage) => {
   let currentPage = startPage;
   const fontName = getFontName();
 
+  // Debug: Check font status
+  console.log('=== TOC Font Debug ===');
+  console.log('Font name for TOC:', fontName);
+  console.log('Available fonts in doc:', Object.keys(doc.getFontList()));
+  console.log('Current font:', doc.getFont());
+
+  // Ensure font is set for TOC
+  try {
+    doc.setFont(fontName, 'normal');
+    console.log('Font set successfully for TOC');
+  } catch (e) {
+    console.error('Failed to set font for TOC:', e);
+    console.error('Falling back to helvetica');
+    doc.setFont('helvetica', 'normal');
+  }
+
   // Title
   doc.setFontSize(16);
   doc.setFont(fontName, 'bold');
