@@ -13,20 +13,21 @@ let consecutiveErrors = 0;
 
 const API_URL = "https://openrouter.ai/api/v1/chat/completions";
 // Updated to currently available OpenRouter free models (December 2024)
-const MODEL = "google/gemma-2-9b-it:free";
+// Using DeepSeek R1 as primary - excellent for reasoning and text analysis
+const MODEL = "tngtech/deepseek-r1t2-chimera:free";
 const FALLBACK_MODELS = [
+  "google/gemma-2-9b-it:free",
   "meta-llama/llama-3.1-8b-instruct:free",
-  "qwen/qwen-2.5-7b-instruct:free",
-  "mistralai/mistral-7b-instruct:free"
+  "qwen/qwen-2.5-7b-instruct:free"
 ];
 
 // Model routing for different tasks (multi-model strategy)
-// Using reliable free models that are currently available on OpenRouter
+// DeepSeek R1 is excellent for complex reasoning tasks
 const MODEL_ROUTING = {
-  metadata: "google/gemma-2-9b-it:free",           // Simple task, fast model
-  section: "google/gemma-2-9b-it:free",            // Needs context understanding
-  spelling: "meta-llama/llama-3.1-8b-instruct:free", // Good for multilingual
-  review: "meta-llama/llama-3.1-8b-instruct:free"    // Complex analysis
+  metadata: "tngtech/deepseek-r1t2-chimera:free",    // Good for extraction
+  section: "tngtech/deepseek-r1t2-chimera:free",     // Excellent for classification
+  spelling: "tngtech/deepseek-r1t2-chimera:free",    // Good for multilingual
+  review: "tngtech/deepseek-r1t2-chimera:free"       // Excellent for analysis
 };
 
 // Cache for AI results (in-memory with TTL)

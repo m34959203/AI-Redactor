@@ -201,11 +201,11 @@ router.get('/status', (req, res) => {
     cacheEnabled: true,
     multiModelEnabled: true,
     models: {
-      primary: 'google/gemma-2-9b-it:free',
+      primary: 'tngtech/deepseek-r1t2-chimera:free',
       fallbacks: [
+        'google/gemma-2-9b-it:free',
         'meta-llama/llama-3.1-8b-instruct:free',
-        'qwen/qwen-2.5-7b-instruct:free',
-        'mistralai/mistral-7b-instruct:free'
+        'qwen/qwen-2.5-7b-instruct:free'
       ]
     },
     timestamp: new Date().toISOString()
