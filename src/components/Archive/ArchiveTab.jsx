@@ -136,9 +136,7 @@ const ArchiveTab = ({ archive, onDownload, onView, onDelete }) => {
 
       <div className="mt-8 p-4 bg-blue-50 rounded-xl text-sm text-blue-700">
         <p className="font-semibold mb-1">Информация о хранении:</p>
-        <p>PDF файлы сохраняются в локальном хранилище браузера (IndexedDB).
-           Они доступны даже после перезагрузки страницы, но будут удалены
-           при очистке данных браузера.</p>
+        <p>PDF файлы сохраняются на сервере и доступны с любого устройства.</p>
       </div>
     </div>
   );
