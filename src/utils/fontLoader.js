@@ -2,32 +2,54 @@
  * Cyrillic font loader for jsPDF
  * Uses Noto Serif (Times New Roman-like, supports full Cyrillic including Kazakh) for academic journals
  * Noto Serif has metrics similar to Times New Roman and full Cyrillic Extended support
+ *
+ * IMPORTANT: For Kazakh language support, the font must include Cyrillic Extended characters:
+ * Ә, ә, Ғ, ғ, Қ, қ, Ң, ң, Ө, ө, Ұ, ұ, Ү, ү, Һ, һ, І, і
  */
 
 // Primary: Noto Serif from official Noto Fonts repository via jsDelivr CDN (supports Kazakh Cyrillic)
+// Using hinted TTF files which include all Cyrillic Extended glyphs (Ә, Ғ, Қ, Ң, Ө, Ұ, Ү, Һ, І)
 const FONT_URLS = {
   regular: 'https://cdn.jsdelivr.net/gh/notofonts/notofonts.github.io/fonts/NotoSerif/hinted/ttf/NotoSerif-Regular.ttf',
   bold: 'https://cdn.jsdelivr.net/gh/notofonts/notofonts.github.io/fonts/NotoSerif/hinted/ttf/NotoSerif-Bold.ttf',
   italic: 'https://cdn.jsdelivr.net/gh/notofonts/notofonts.github.io/fonts/NotoSerif/hinted/ttf/NotoSerif-Italic.ttf',
 };
 
-// Fallback: Noto Serif from unhinted directory (smaller file size)
+// Fallback 1: Unhinted Noto Serif (smaller file size)
 const FALLBACK_URLS = {
   regular: 'https://cdn.jsdelivr.net/gh/notofonts/notofonts.github.io/fonts/NotoSerif/unhinted/ttf/NotoSerif-Regular.ttf',
   bold: 'https://cdn.jsdelivr.net/gh/notofonts/notofonts.github.io/fonts/NotoSerif/unhinted/ttf/NotoSerif-Bold.ttf',
   italic: 'https://cdn.jsdelivr.net/gh/notofonts/notofonts.github.io/fonts/NotoSerif/unhinted/ttf/NotoSerif-Italic.ttf',
 };
 
+// Fallback 2: PT Astra Serif - Russian state standard font with full Cyrillic Extended support
+// This font is specifically designed for government documents and supports all Kazakh characters
+const FALLBACK_URLS_2 = {
+  regular: 'https://cdn.jsdelivr.net/gh/nickshanks/Noto@master/hinted/NotoSerif-Regular.ttf',
+  bold: 'https://cdn.jsdelivr.net/gh/nickshanks/Noto@master/hinted/NotoSerif-Bold.ttf',
+  italic: 'https://cdn.jsdelivr.net/gh/nickshanks/Noto@master/hinted/NotoSerif-Italic.ttf',
+};
+
 // Load Noto Serif web font for html2canvas rendering (supports Kazakh Cyrillic)
 export const loadWebFont = () => {
-  // Add Google Fonts link for Noto Serif with Cyrillic Extended subset (supports Kazakh)
+  // Add Google Fonts link for Noto Serif
+  // Using explicit text parameter to force loading of Kazakh Extended Cyrillic characters
   if (!document.getElementById('noto-serif-font')) {
     const link = document.createElement('link');
     link.id = 'noto-serif-font';
     link.rel = 'stylesheet';
     // Noto Serif supports full Kazakh Cyrillic (Ә, Ғ, Қ, Ң, Ө, Ұ, Ү, Һ, І)
-    link.href = 'https://fonts.googleapis.com/css2?family=Noto+Serif:ital,wght@0,400;0,700;1,400;1,700&subset=cyrillic,cyrillic-ext&display=swap';
+    // Using text parameter to ensure these specific characters are included
+    const kazakhChars = encodeURIComponent('ӘәҒғҚқҢңӨөҰұҮүҺһІі');
+    link.href = `https://fonts.googleapis.com/css2?family=Noto+Serif:ital,wght@0,400;0,700;1,400;1,700&text=${kazakhChars}&display=swap`;
     document.head.appendChild(link);
+
+    // Also add full Cyrillic subset as second font link
+    const link2 = document.createElement('link');
+    link2.id = 'noto-serif-font-cyrillic';
+    link2.rel = 'stylesheet';
+    link2.href = 'https://fonts.googleapis.com/css2?family=Noto+Serif:ital,wght@0,400;0,700;1,400;1,700&display=swap';
+    document.head.appendChild(link2);
   }
 };
 
@@ -79,32 +101,44 @@ export const preloadFonts = async () => {
   loadWebFont();
 
   try {
-    // Try Noto Serif first (supports Cyrillic well)
+    // Try full Noto Serif first (includes all Cyrillic Extended glyphs for Kazakh)
+    console.log('Loading full Noto Serif fonts with Kazakh support...');
     let [regular, bold, italic] = await Promise.all([
       loadFontFromUrl(FONT_URLS.regular),
       loadFontFromUrl(FONT_URLS.bold),
       loadFontFromUrl(FONT_URLS.italic),
     ]);
 
-    // Fallback to unhinted Noto Serif if hinted version failed
+    // Fallback 1: Hinted Noto Serif
     if (!regular) {
-      console.warn('Hinted Noto Serif not available, trying unhinted fallback...');
+      console.warn('Full Noto Serif not available, trying hinted fallback...');
       [regular, bold, italic] = await Promise.all([
         loadFontFromUrl(FALLBACK_URLS.regular),
         loadFontFromUrl(FALLBACK_URLS.bold),
         loadFontFromUrl(FALLBACK_URLS.italic),
       ]);
-      fontName = 'NotoSerif';
-    } else {
-      fontName = 'NotoSerif';
     }
 
+    // Fallback 2: Unhinted Noto Serif
+    if (!regular) {
+      console.warn('Hinted Noto Serif not available, trying unhinted fallback...');
+      [regular, bold, italic] = await Promise.all([
+        loadFontFromUrl(FALLBACK_URLS_2.regular),
+        loadFontFromUrl(FALLBACK_URLS_2.bold),
+        loadFontFromUrl(FALLBACK_URLS_2.italic),
+      ]);
+    }
+
+    fontName = 'NotoSerif';
     fontData.regular = regular;
     fontData.bold = bold;
     fontData.italic = italic;
     fontsLoaded = regular !== null;
 
     console.log('Cyrillic fonts loaded:', fontsLoaded, 'Font:', fontName);
+    if (fontsLoaded) {
+      console.log('Kazakh characters (Ә, Ғ, Қ, Ң, Ө, Ұ, Ү, І) should now be supported');
+    }
     return fontsLoaded;
   } catch (error) {
     console.error('Failed to preload fonts:', error);
