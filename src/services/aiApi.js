@@ -1,5 +1,6 @@
 /**
  * AI API Service - Frontend client for AI operations
+ * Supports Groq (primary) and OpenRouter (fallback)
  * All requests go through backend proxy for security
  */
 
@@ -49,6 +50,43 @@ const handleApiError = (error, response) => {
     throw new Error(`RATE_LIMIT|${data.error || 'Rate limit exceeded'}|${data.suggestion || 'Try again later'}`);
   }
   throw new Error(error.error || error.message || 'AI request failed');
+};
+
+/**
+ * Combined article analysis: metadata + section + quick review
+ * 4x faster than separate requests - uses single API call
+ */
+export const analyzeArticle = async (fileName, content) => {
+  const fallback = {
+    title: fileName.replace('.docx', '').replace(/_/g, ' '),
+    author: 'Автор не указан',
+    section: NEEDS_REVIEW_SECTION,
+    sectionConfidence: 0,
+    needsReview: true,
+    structureScore: 0,
+    qualityScore: 0
+  };
+
+  try {
+    const response = await fetch(`${API_BASE}/api/ai/analyze`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fileName, content })
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      handleApiError(error, response);
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('Article analysis error:', error);
+    if (error.message === 'API_KEY_MISSING' || error.message === 'API_KEY_INVALID') {
+      return { ...fallback, author: '⚠️ API не настроен' };
+    }
+    return fallback;
+  }
 };
 
 /**

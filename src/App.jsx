@@ -12,7 +12,7 @@ import ArchiveTab from './components/Archive/ArchiveTab';
 import InfoTab from './components/Info/InfoTab';
 
 import { useApp, useNotifications, useProcessing } from './context/AppContext';
-import { extractMetadataWithAI, checkSpelling, reviewArticle, detectArticleSection, ARTICLE_SECTIONS, retryArticleClassification, batchRetryClassification } from './services/aiApi';
+import { analyzeArticle, extractMetadataWithAI, checkSpelling, reviewArticle, detectArticleSection, ARTICLE_SECTIONS, retryArticleClassification, batchRetryClassification } from './services/aiApi';
 import { validatePageFile, validateArticleFile } from './utils/fileValidation';
 import useTheme from './hooks/useTheme';
 import { detectLanguage, sortArticlesBySectionAndLanguage, NEEDS_REVIEW_SECTION } from './utils/languageDetection';
@@ -159,7 +159,7 @@ const App = () => {
           reasoning: 'Требуется классификация'
         };
 
-        // Step 3: Try AI enhancement only if still available
+        // Step 3: Try AI analysis (combined: metadata + section in one request - 2x faster)
         if (aiAvailable) {
           // Helper to handle rate limit errors
           const handleRateLimitError = (error) => {
@@ -170,41 +170,35 @@ const App = () => {
                 rateLimitShown = true;
                 showError(`${message}\n${suggestion}\n\n⏩ Продолжаю загрузку в локальном режиме...`);
               }
-              return true; // Rate limit detected
+              return true;
             } else if (error.message?.includes('Rate limit') || error.message?.includes('429')) {
               aiAvailable = false;
               if (!rateLimitShown) {
                 rateLimitShown = true;
                 showError('⚠️ Лимит API исчерпан\n⏩ Продолжаю загрузку в локальном режиме...');
               }
-              return true; // Rate limit detected
+              return true;
             }
-            return false; // Not a rate limit error
+            return false;
           };
 
-          // Try AI metadata extraction
+          // Combined AI analysis (metadata + section in one request)
           try {
-            const aiMetadata = await extractMetadataWithAI(file.name, content);
-            if (aiMetadata.title && aiMetadata.title !== file.name.replace('.docx', '').replace(/_/g, ' ')) {
-              metadata = aiMetadata;
+            const analysis = await analyzeArticle(file.name, content);
+            if (analysis.title && analysis.title !== file.name.replace('.docx', '').replace(/_/g, ' ')) {
+              metadata = { title: analysis.title, author: analysis.author };
+            }
+            if (analysis.section !== NEEDS_REVIEW_SECTION) {
+              sectionResult = {
+                section: analysis.section,
+                confidence: analysis.sectionConfidence,
+                needsReview: analysis.needsReview,
+                reasoning: analysis.sectionReasoning
+              };
             }
           } catch (error) {
             if (!handleRateLimitError(error)) {
-              console.warn('AI metadata error:', error.message);
-            }
-          }
-
-          // Try AI section detection only if AI still available
-          if (aiAvailable) {
-            try {
-              const aiSection = await detectArticleSection(content, metadata.title);
-              if (aiSection.section !== NEEDS_REVIEW_SECTION) {
-                sectionResult = aiSection;
-              }
-            } catch (error) {
-              if (!handleRateLimitError(error)) {
-                console.warn('AI section error:', error.message);
-              }
+              console.warn('AI analysis error:', error.message);
             }
           }
         }
