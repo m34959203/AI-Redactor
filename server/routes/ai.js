@@ -186,6 +186,36 @@ router.delete('/cache', (req, res) => {
 });
 
 /**
+ * GET /api/ai/health
+ * Health check for monitoring (Kubernetes, Railway, etc.)
+ */
+router.get('/health', async (req, res) => {
+  try {
+    const health = await aiService.healthCheck();
+    const statusCode = health.status === 'healthy' ? 200 : (health.status === 'degraded' ? 200 : 503);
+    res.status(statusCode).json(health);
+  } catch (error) {
+    res.status(503).json({
+      status: 'error',
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+/**
+ * GET /api/ai/metrics
+ * Usage metrics for analytics
+ */
+router.get('/metrics', (req, res) => {
+  const metrics = aiService.getMetrics();
+  res.json({
+    ...metrics,
+    timestamp: new Date().toISOString()
+  });
+});
+
+/**
  * GET /api/ai/status
  * Check AI service status with provider info
  */

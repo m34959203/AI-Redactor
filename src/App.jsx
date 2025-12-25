@@ -118,7 +118,8 @@ const App = () => {
   // Articles upload handler - BATCH processing for maximum speed
   const handleArticlesUpload = async (files) => {
     const totalFiles = files.length;
-    setProcessing(true, 'Чтение файлов...', 0, totalFiles);
+    const startTime = Date.now();
+    setProcessing(true, 'Подготовка файлов...', 0, totalFiles);
     const newArticles = [];
     const articlesForBatch = [];
 
@@ -126,7 +127,7 @@ const App = () => {
       // Step 1: Read all files first (fast, local)
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
-        setProcessing(true, `📄 Чтение [${i + 1}/${totalFiles}] ${file.name}`, i, totalFiles);
+        setProcessing(true, `Читаю файл ${i + 1} из ${totalFiles}...`, i, totalFiles);
 
         const validation = validateArticleFile(file);
         if (!validation.valid) {
@@ -162,15 +163,17 @@ const App = () => {
       const BATCH_SIZE = 5;
       const totalBatches = Math.ceil(articlesForBatch.length / BATCH_SIZE);
       let aiAvailable = true;
+      let processedCount = 0;
 
-      setProcessing(true, `🤖 AI анализ (${totalBatches} batch)...`, 0, articlesForBatch.length);
+      setProcessing(true, `Анализирую статьи...`, 0, articlesForBatch.length);
 
       for (let batchIndex = 0; batchIndex < totalBatches && aiAvailable; batchIndex++) {
         const batchStart = batchIndex * BATCH_SIZE;
         const batch = articlesForBatch.slice(batchStart, batchStart + BATCH_SIZE);
-        const batchNum = batchIndex + 1;
 
-        setProcessing(true, `🤖 AI batch ${batchNum}/${totalBatches} (${batch.length} статей)`, batchStart, articlesForBatch.length);
+        // User-friendly progress message
+        const progress = Math.min(batchStart + batch.length, articlesForBatch.length);
+        setProcessing(true, `Анализирую статьи... (${progress} из ${articlesForBatch.length})`, batchStart, articlesForBatch.length);
 
         try {
           const batchInput = batch.map(a => ({ fileName: a.fileName, content: a.content }));
@@ -205,7 +208,7 @@ const App = () => {
           // Check for rate limit
           if (error.message?.includes('RATE_LIMIT') || error.message?.includes('429')) {
             aiAvailable = false;
-            showError('⚠️ Лимит API исчерпан\n⏩ Продолжаю с локальными данными...');
+            showError('Сервер занят. Используем быстрый режим обработки.');
           }
 
           // Fallback to local data for this batch
@@ -225,6 +228,8 @@ const App = () => {
             });
           }
         }
+
+        processedCount = batchStart + batch.length;
       }
 
       const allArticles = [...articles, ...newArticles];
@@ -234,13 +239,13 @@ const App = () => {
 
       // Автоматическая проверка орфографии для загруженных статей
       if (newArticles.length > 0 && aiAvailable) {
-        setProcessing(true, 'Проверка орфографии...', 0, newArticles.length);
+        setProcessing(true, 'Проверяю орфографию...', 0, newArticles.length);
         const spellCheckResults = [];
         let spellCheckErrors = 0;
 
         for (let i = 0; i < newArticles.length; i++) {
           const article = newArticles[i];
-          setProcessing(true, `📝 Проверка орфографии [${i + 1}/${newArticles.length}] ${article.title.substring(0, 30)}...`, i, newArticles.length);
+          setProcessing(true, `Проверяю орфографию... (${i + 1} из ${newArticles.length})`, i, newArticles.length);
 
           try {
             const result = await checkSpelling(article.content, article.file.name);
@@ -263,31 +268,36 @@ const App = () => {
         }
 
         // Формируем итоговое сообщение
+        const elapsedTime = Math.round((Date.now() - startTime) / 1000);
         const needsClassification = newArticles.filter(a => a.needsReview).length;
-        let message = `✅ Загружено ${newArticles.length} статей`;
+        const classifiedCount = newArticles.length - needsClassification;
 
-        if (spellCheckResults.length > 0) {
-          if (spellCheckErrors > 0) {
-            message += `\n📝 Найдено ${spellCheckErrors} орфографических ошибок`;
-          } else {
-            message += `\n📝 Орфографических ошибок не найдено`;
-          }
+        let message = `Готово! ${newArticles.length} статей за ${elapsedTime} сек`;
+
+        if (classifiedCount > 0) {
+          message += `\n${classifiedCount} классифицированы автоматически`;
+        }
+
+        if (spellCheckResults.length > 0 && spellCheckErrors > 0) {
+          message += `\n${spellCheckErrors} орфографических замечаний`;
         }
 
         if (needsClassification > 0) {
-          message += `\n📋 ${needsClassification} требуют классификации`;
+          message += `\n${needsClassification} требуют ручной проверки`;
         }
 
         showSuccess(message);
       } else {
         // Если AI недоступен - показываем только информацию о загрузке
+        const elapsedTime = Math.round((Date.now() - startTime) / 1000);
         const needsClassification = newArticles.filter(a => a.needsReview).length;
-        if (rateLimitShown) {
-          showSuccess(`✅ Загружено ${newArticles.length} статей (локальный режим)\n📋 ${needsClassification} требуют классификации`);
+
+        if (!aiAvailable) {
+          showSuccess(`Загружено ${newArticles.length} статей за ${elapsedTime} сек (быстрый режим)\n${needsClassification} требуют классификации`);
         } else if (needsClassification > 0) {
-          showSuccess(`Загружено ${newArticles.length} статей. ${needsClassification} требуют классификации (нажмите "Повторить анализ")`);
+          showSuccess(`Загружено ${newArticles.length} статей за ${elapsedTime} сек\n${needsClassification} требуют классификации`);
         } else {
-          showSuccess(`Загружено ${newArticles.length} статей`);
+          showSuccess(`Загружено ${newArticles.length} статей за ${elapsedTime} сек`);
         }
       }
     } catch (error) {

@@ -5,40 +5,39 @@
  */
 
 import crypto from 'crypto';
+import {
+  BATCH_CONFIG,
+  RATE_LIMIT_CONFIG,
+  CACHE_CONFIG,
+  PROVIDERS,
+  ARTICLE_SECTIONS,
+  NEEDS_REVIEW_SECTION,
+  CONFIDENCE_THRESHOLDS,
+  SYSTEM_PROMPT
+} from '../config/aiConfig.js';
 
-// ============ PROVIDER CONFIGURATION ============
+// ============ METRICS TRACKING ============
+let metrics = {
+  totalRequests: 0,
+  cacheHits: 0,
+  groqRequests: 0,
+  openrouterRequests: 0,
+  fallbackCount: 0,
+  errors: 0,
+  lastRequestTime: null,
+  avgResponseTime: 0
+};
 
-const PROVIDERS = {
-  groq: {
-    name: 'Groq',
-    url: 'https://api.groq.com/openai/v1/chat/completions',
-    model: 'llama-3.3-70b-versatile',
-    fallbackModels: ['mixtral-8x7b-32768', 'llama-3.1-8b-instant'],
-    keyEnv: 'GROQ_API_KEY',
-    rateLimit: { requestsPerMin: 30, tokensPerMin: 15000 },
-    headers: (apiKey) => ({
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`
-    })
-  },
-  openrouter: {
-    name: 'OpenRouter',
-    url: 'https://openrouter.ai/api/v1/chat/completions',
-    model: 'tngtech/deepseek-r1t2-chimera:free',
-    fallbackModels: [
-      'google/gemma-2-9b-it:free',
-      'meta-llama/llama-3.1-8b-instruct:free',
-      'qwen/qwen-2.5-7b-instruct:free'
-    ],
-    keyEnv: 'OPENROUTER_API_KEY',
-    rateLimit: { requestsPerMin: 20, requestsPerDay: 200 },
-    headers: (apiKey) => ({
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
-      'HTTP-Referer': process.env.APP_URL || 'https://ai-redactor.railway.app',
-      'X-Title': 'AI Journal Editor'
-    })
-  }
+const updateMetrics = (provider, responseTime, isError = false) => {
+  metrics.totalRequests++;
+  metrics.lastRequestTime = new Date().toISOString();
+
+  if (provider === 'Groq') metrics.groqRequests++;
+  if (provider === 'OpenRouter') metrics.openrouterRequests++;
+  if (isError) metrics.errors++;
+
+  // Running average of response time
+  metrics.avgResponseTime = (metrics.avgResponseTime * (metrics.totalRequests - 1) + responseTime) / metrics.totalRequests;
 };
 
 // Get active provider (Groq primary, OpenRouter fallback)
@@ -54,17 +53,14 @@ const getActiveProvider = () => {
 
 // ============ RATE LIMITING ============
 
-const RATE_LIMIT_DELAY = 2000; // 2s for Groq (30 req/min = 2s between requests)
-const RATE_LIMIT_DELAY_OPENROUTER = 5000;
-const RATE_LIMIT_DELAY_AFTER_429 = 10000;
 let lastRequestTime = 0;
 let consecutiveErrors = 0;
 let currentProviderName = null;
 
 const waitForRateLimit = async (providerName) => {
   const now = Date.now();
-  let baseDelay = providerName === 'groq' ? RATE_LIMIT_DELAY : RATE_LIMIT_DELAY_OPENROUTER;
-  if (consecutiveErrors > 0) baseDelay = RATE_LIMIT_DELAY_AFTER_429;
+  let baseDelay = providerName === 'groq' ? RATE_LIMIT_CONFIG.GROQ_DELAY : RATE_LIMIT_CONFIG.OPENROUTER_DELAY;
+  if (consecutiveErrors > 0) baseDelay = RATE_LIMIT_CONFIG.DELAY_AFTER_429;
 
   const timeSinceLastRequest = now - lastRequestTime;
   if (timeSinceLastRequest < baseDelay) {
@@ -78,17 +74,17 @@ const waitForRateLimit = async (providerName) => {
 // ============ CACHE ============
 
 const cache = new Map();
-const CACHE_TTL = 30 * 60 * 1000; // 30 minutes
 
 const generateCacheKey = (taskType, content, additionalKey = '') => {
-  const hash = crypto.createHash('md5').update(content.substring(0, 2000)).digest('hex');
+  const hash = crypto.createHash('md5').update(content.substring(0, CACHE_CONFIG.HASH_LENGTH)).digest('hex');
   return `${taskType}:${hash}:${additionalKey}`;
 };
 
 const getCached = (key) => {
   const cached = cache.get(key);
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+  if (cached && Date.now() - cached.timestamp < CACHE_CONFIG.TTL) {
     console.log(`Cache hit for ${key}`);
+    metrics.cacheHits++;
     return cached.data;
   }
   if (cached) cache.delete(key);
@@ -97,10 +93,10 @@ const getCached = (key) => {
 
 const setCache = (key, data) => {
   cache.set(key, { data, timestamp: Date.now() });
-  if (cache.size > 1000) {
+  if (cache.size > CACHE_CONFIG.MAX_SIZE) {
     const now = Date.now();
     for (const [k, v] of cache.entries()) {
-      if (now - v.timestamp > CACHE_TTL) cache.delete(k);
+      if (now - v.timestamp > CACHE_CONFIG.TTL) cache.delete(k);
     }
   }
 };
@@ -204,22 +200,6 @@ const parseRateLimitError = (errorMessage, providerName) => {
 
   return { type: 'unknown', message: 'Лимит запросов исчерпан', suggestion: 'Попробуйте позже' };
 };
-
-// ============ SYSTEM PROMPT ============
-
-const SYSTEM_PROMPT = `Ты - эксперт-редактор научного журнала с 20-летним опытом.
-Специализация: анализ и классификация академических публикаций.
-
-ТВОИ КОМПЕТЕНЦИИ:
-- Классификация статей по научным дисциплинам
-- Извлечение метаданных из научных текстов
-- Проверка орфографии на русском, казахском и английском языках
-- Рецензирование по академическим стандартам
-
-ФОРМАТ ОТВЕТА:
-- ВСЕГДА отвечай ТОЛЬКО валидным JSON
-- НИКОГДА не добавляй текст до или после JSON
-- При неуверенности используй поле "confidence"`;
 
 // ============ CORE AI REQUEST ============
 
@@ -361,16 +341,6 @@ const makeAIRequest = async (prompt, maxTokens = 1000, taskType = 'general', opt
   }
 };
 
-// ============ ARTICLE SECTIONS ============
-
-const ARTICLE_SECTIONS = [
-  'ТЕХНИЧЕСКИЕ НАУКИ',
-  'ПЕДАГОГИЧЕСКИЕ НАУКИ',
-  'ЕСТЕСТВЕННЫЕ И ЭКОНОМИЧЕСКИЕ НАУКИ'
-];
-const NEEDS_REVIEW_SECTION = 'ТРЕБУЕТ КЛАССИФИКАЦИИ';
-const CONFIDENCE_THRESHOLDS = { HIGH: 0.8, MEDIUM: 0.6, LOW: 0.4 };
-
 // ============ COMBINED ANALYSIS (FAST) ============
 
 /**
@@ -487,10 +457,8 @@ ${content.substring(0, 4000)}
 export const analyzeArticlesBatch = async (articles) => {
   if (!articles || articles.length === 0) return [];
 
-  // Limit batch size to prevent token overflow
-  const BATCH_SIZE = 5;
-  const MAX_CHARS_PER_ARTICLE = 1500;
-
+  // Use config values
+  const { BATCH_SIZE, MAX_CHARS_PER_ARTICLE } = BATCH_CONFIG;
   const batch = articles.slice(0, BATCH_SIZE);
 
   // Check cache for each article
@@ -912,7 +880,7 @@ ${content.substring(0, 3500)}
   };
 };
 
-// ============ STATUS & CACHE ============
+// ============ STATUS, METRICS & CACHE ============
 
 export const getStatus = () => {
   const groqKey = process.env.GROQ_API_KEY;
@@ -932,20 +900,84 @@ export const getStatus = () => {
       model: PROVIDERS.openrouter.model,
       rateLimit: '200 req/day'
     },
+    config: {
+      batchSize: BATCH_CONFIG.BATCH_SIZE,
+      maxCharsPerArticle: BATCH_CONFIG.MAX_CHARS_PER_ARTICLE,
+      cacheTTL: CACHE_CONFIG.TTL / 60000 + ' min'
+    },
     cacheEnabled: true,
     cacheSize: cache.size
   };
 };
 
+/**
+ * Get usage metrics for monitoring
+ */
+export const getMetrics = () => ({
+  ...metrics,
+  cacheSize: cache.size,
+  cacheHitRate: metrics.totalRequests > 0
+    ? Math.round((metrics.cacheHits / (metrics.totalRequests + metrics.cacheHits)) * 100) + '%'
+    : '0%',
+  fallbackRate: metrics.totalRequests > 0
+    ? Math.round((metrics.fallbackCount / metrics.totalRequests) * 100) + '%'
+    : '0%',
+  errorRate: metrics.totalRequests > 0
+    ? Math.round((metrics.errors / metrics.totalRequests) * 100) + '%'
+    : '0%'
+});
+
+/**
+ * Health check for monitoring
+ */
+export const healthCheck = async () => {
+  const status = getStatus();
+  const startTime = Date.now();
+
+  // Quick connectivity test
+  let healthy = false;
+  let provider = null;
+  let responseTime = 0;
+
+  if (status.available) {
+    try {
+      const activeConfig = getActiveProvider();
+      if (activeConfig) {
+        provider = activeConfig.provider.name;
+        const response = await fetch(activeConfig.provider.url.replace('/chat/completions', '/models'), {
+          method: 'GET',
+          headers: { 'Authorization': `Bearer ${activeConfig.apiKey}` }
+        });
+        healthy = response.ok;
+        responseTime = Date.now() - startTime;
+      }
+    } catch {
+      healthy = false;
+      responseTime = Date.now() - startTime;
+    }
+  }
+
+  return {
+    status: healthy ? 'healthy' : (status.available ? 'degraded' : 'unavailable'),
+    provider,
+    responseTime,
+    timestamp: new Date().toISOString(),
+    metrics: getMetrics()
+  };
+};
+
 export const getCacheStats = () => ({
   size: cache.size,
-  maxSize: 1000,
-  ttl: CACHE_TTL
+  maxSize: CACHE_CONFIG.MAX_SIZE,
+  ttl: CACHE_CONFIG.TTL,
+  hitRate: metrics.cacheHits > 0
+    ? Math.round((metrics.cacheHits / (metrics.totalRequests + metrics.cacheHits)) * 100) + '%'
+    : '0%'
 });
 
 export const clearCache = () => {
   cache.clear();
-  return { cleared: true };
+  return { cleared: true, previousSize: cache.size };
 };
 
 export default {
@@ -957,6 +989,8 @@ export default {
   reviewArticle,
   retryClassification,
   getStatus,
+  getMetrics,
+  healthCheck,
   getCacheStats,
   clearCache
 };
