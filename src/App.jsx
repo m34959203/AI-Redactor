@@ -12,7 +12,7 @@ import ArchiveTab from './components/Archive/ArchiveTab';
 import InfoTab from './components/Info/InfoTab';
 
 import { useApp, useNotifications, useProcessing } from './context/AppContext';
-import { analyzeArticle, extractMetadataWithAI, checkSpelling, reviewArticle, detectArticleSection, ARTICLE_SECTIONS, retryArticleClassification, batchRetryClassification } from './services/aiApi';
+import { analyzeArticle, analyzeArticlesBatch, extractMetadataWithAI, checkSpelling, reviewArticle, detectArticleSection, ARTICLE_SECTIONS, retryArticleClassification, batchRetryClassification } from './services/aiApi';
 import { validatePageFile, validateArticleFile } from './utils/fileValidation';
 import useTheme from './hooks/useTheme';
 import { detectLanguage, sortArticlesBySectionAndLanguage, NEEDS_REVIEW_SECTION } from './utils/languageDetection';
@@ -115,32 +115,25 @@ const App = () => {
     }
   };
 
-  // Articles upload handler - fast local processing with optional AI enhancement
+  // Articles upload handler - BATCH processing for maximum speed
   const handleArticlesUpload = async (files) => {
     const totalFiles = files.length;
-    let currentStep = 0;
-    setProcessing(true, 'Загрузка статей...', currentStep, totalFiles);
+    setProcessing(true, 'Чтение файлов...', 0, totalFiles);
     const newArticles = [];
-    let aiAvailable = true; // Track if AI is working
-    let rateLimitShown = false; // Show rate limit message only once
+    const articlesForBatch = [];
 
     try {
+      // Step 1: Read all files first (fast, local)
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
-        const fileNum = i + 1;
-
-        // Show appropriate status based on AI availability
-        const modeLabel = aiAvailable ? 'AI' : 'Локально';
-        setProcessing(true, `${modeLabel} [${fileNum}/${totalFiles}] ${file.name}`, currentStep, totalFiles);
+        setProcessing(true, `📄 Чтение [${i + 1}/${totalFiles}] ${file.name}`, i, totalFiles);
 
         const validation = validateArticleFile(file);
         if (!validation.valid) {
           console.warn(`Skipping file ${file.name}: ${validation.error}`);
-          currentStep++;
           continue;
         }
 
-        // Step 1: Read file content
         let content;
         try {
           content = await convertDocxToText(file);
@@ -149,80 +142,89 @@ const App = () => {
           content = await file.text();
         }
 
-        // Step 2: Local metadata extraction (always works, fast)
+        // Local metadata as fallback
         const localMetadata = extractMetadataLocal(file.name, content);
-        let metadata = localMetadata;
-        let sectionResult = {
-          section: NEEDS_REVIEW_SECTION,
-          confidence: 0,
-          needsReview: true,
-          reasoning: 'Требуется классификация'
-        };
 
-        // Step 3: Try AI analysis (combined: metadata + section in one request - 2x faster)
-        if (aiAvailable) {
-          // Helper to handle rate limit errors
-          const handleRateLimitError = (error) => {
-            if (error.message?.startsWith('RATE_LIMIT_DAILY|') || error.message?.startsWith('RATE_LIMIT|')) {
-              const [, message, suggestion] = error.message.split('|');
-              aiAvailable = false;
-              if (!rateLimitShown) {
-                rateLimitShown = true;
-                showError(`${message}\n${suggestion}\n\n⏩ Продолжаю загрузку в локальном режиме...`);
-              }
-              return true;
-            } else if (error.message?.includes('Rate limit') || error.message?.includes('429')) {
-              aiAvailable = false;
-              if (!rateLimitShown) {
-                rateLimitShown = true;
-                showError('⚠️ Лимит API исчерпан\n⏩ Продолжаю загрузку в локальном режиме...');
-              }
-              return true;
-            }
-            return false;
-          };
+        articlesForBatch.push({
+          file,
+          fileName: file.name,
+          content,
+          localMetadata
+        });
+      }
 
-          // Combined AI analysis (metadata + section in one request)
-          try {
-            const analysis = await analyzeArticle(file.name, content);
-            if (analysis.title && analysis.title !== file.name.replace('.docx', '').replace(/_/g, ' ')) {
-              metadata = { title: analysis.title, author: analysis.author };
-            }
-            if (analysis.section !== NEEDS_REVIEW_SECTION) {
-              sectionResult = {
-                section: analysis.section,
-                confidence: analysis.sectionConfidence,
-                needsReview: analysis.needsReview,
-                reasoning: analysis.sectionReasoning
-              };
-            }
-          } catch (error) {
-            if (!handleRateLimitError(error)) {
-              console.warn('AI analysis error:', error.message);
-            }
+      if (articlesForBatch.length === 0) {
+        showError('Не удалось прочитать ни один файл');
+        return;
+      }
+
+      // Step 2: Batch AI analysis (5 articles per request = 20x faster)
+      const BATCH_SIZE = 5;
+      const totalBatches = Math.ceil(articlesForBatch.length / BATCH_SIZE);
+      let aiAvailable = true;
+
+      setProcessing(true, `🤖 AI анализ (${totalBatches} batch)...`, 0, articlesForBatch.length);
+
+      for (let batchIndex = 0; batchIndex < totalBatches && aiAvailable; batchIndex++) {
+        const batchStart = batchIndex * BATCH_SIZE;
+        const batch = articlesForBatch.slice(batchStart, batchStart + BATCH_SIZE);
+        const batchNum = batchIndex + 1;
+
+        setProcessing(true, `🤖 AI batch ${batchNum}/${totalBatches} (${batch.length} статей)`, batchStart, articlesForBatch.length);
+
+        try {
+          const batchInput = batch.map(a => ({ fileName: a.fileName, content: a.content }));
+          const batchResults = await analyzeArticlesBatch(batchInput);
+
+          // Merge AI results with local data
+          for (let i = 0; i < batch.length; i++) {
+            const articleData = batch[i];
+            const aiResult = batchResults.find(r => r.fileName === articleData.fileName) || {};
+
+            const title = aiResult.title || articleData.localMetadata.title;
+            const author = aiResult.author || articleData.localMetadata.author;
+            const language = detectLanguage(title) || detectLanguage(articleData.content.substring(0, 500)) || 'cyrillic';
+
+            newArticles.push({
+              id: Date.now() + Math.random() + i,
+              file: articleData.file,
+              title,
+              author,
+              language,
+              section: aiResult.section || NEEDS_REVIEW_SECTION,
+              sectionConfidence: aiResult.sectionConfidence || 0,
+              needsReview: aiResult.needsReview !== false,
+              sectionReasoning: aiResult.sectionReasoning,
+              content: articleData.content,
+              aiProcessed: true
+            });
+          }
+        } catch (error) {
+          console.error('Batch analysis error:', error);
+
+          // Check for rate limit
+          if (error.message?.includes('RATE_LIMIT') || error.message?.includes('429')) {
+            aiAvailable = false;
+            showError('⚠️ Лимит API исчерпан\n⏩ Продолжаю с локальными данными...');
+          }
+
+          // Fallback to local data for this batch
+          for (const articleData of batch) {
+            const language = detectLanguage(articleData.localMetadata.title) || 'cyrillic';
+            newArticles.push({
+              id: Date.now() + Math.random(),
+              file: articleData.file,
+              title: articleData.localMetadata.title,
+              author: articleData.localMetadata.author,
+              language,
+              section: NEEDS_REVIEW_SECTION,
+              sectionConfidence: 0,
+              needsReview: true,
+              content: articleData.content,
+              aiProcessed: false
+            });
           }
         }
-
-        currentStep++;
-
-        // Determine language from title (priority) or content
-        const language = detectLanguage(metadata.title) || detectLanguage(content.substring(0, 500)) || 'cyrillic';
-
-        const article = {
-          id: Date.now() + Math.random(),
-          file,
-          title: metadata.title,
-          author: metadata.author,
-          language,
-          section: sectionResult.section,
-          sectionConfidence: sectionResult.confidence,
-          needsReview: sectionResult.needsReview,
-          sectionReasoning: sectionResult.reasoning,
-          content,
-          aiProcessed: !rateLimitShown && aiAvailable, // Track if AI was used for this article
-        };
-
-        newArticles.push(article);
       }
 
       const allArticles = [...articles, ...newArticles];

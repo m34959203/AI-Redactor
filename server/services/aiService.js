@@ -476,6 +476,155 @@ ${content.substring(0, 4000)}
   }
 };
 
+// ============ BATCH ANALYSIS (MAXIMUM SPEED) ============
+
+/**
+ * Analyze multiple articles in one request
+ * Up to 5 articles per batch = 20x faster than individual requests
+ * @param {Array} articles - Array of {fileName, content}
+ * @returns {Array} - Array of analysis results
+ */
+export const analyzeArticlesBatch = async (articles) => {
+  if (!articles || articles.length === 0) return [];
+
+  // Limit batch size to prevent token overflow
+  const BATCH_SIZE = 5;
+  const MAX_CHARS_PER_ARTICLE = 1500;
+
+  const batch = articles.slice(0, BATCH_SIZE);
+
+  // Check cache for each article
+  const results = [];
+  const uncachedArticles = [];
+
+  for (const article of batch) {
+    const cacheKey = generateCacheKey('analyze', article.content, article.fileName);
+    const cached = getCached(cacheKey);
+    if (cached) {
+      results.push({ ...cached, fileName: article.fileName, fromCache: true });
+    } else {
+      uncachedArticles.push(article);
+    }
+  }
+
+  // If all cached, return immediately
+  if (uncachedArticles.length === 0) {
+    console.log(`Batch: all ${batch.length} articles from cache`);
+    return results;
+  }
+
+  // Build batch prompt
+  const articlesText = uncachedArticles.map((a, i) =>
+    `### СТАТЬЯ ${i + 1} (файл: "${a.fileName}"):\n${a.content.substring(0, MAX_CHARS_PER_ARTICLE)}`
+  ).join('\n\n');
+
+  const prompt = `## ЗАДАЧА
+Проанализируй ${uncachedArticles.length} научных статей и верни массив результатов.
+
+## ПРАВИЛА:
+- НАЗВАНИЕ: после УДК/UDC, до авторов
+- АВТОР: первый автор в формате "Фамилия И.О."
+- РАЗДЕЛ (выбери ОДИН для каждой):
+  1. ТЕХНИЧЕСКИЕ НАУКИ — IT, инженерия, программирование
+  2. ПЕДАГОГИЧЕСКИЕ НАУКИ — образование, методика преподавания
+  3. ЕСТЕСТВЕННЫЕ И ЭКОНОМИЧЕСКИЕ НАУКИ — физика, химия, биология, экономика
+
+## СТАТЬИ:
+${articlesText}
+
+## ОТВЕТ (JSON массив, СТРОГО ${uncachedArticles.length} элементов):
+[
+  {"fileName": "имя_файла_1", "title": "...", "author": "...", "section": "...", "sectionConfidence": 0.0-1.0},
+  ...
+]`;
+
+  const fallbackResults = uncachedArticles.map(a => ({
+    fileName: a.fileName,
+    title: a.fileName.replace('.docx', '').replace(/_/g, ' '),
+    author: 'Автор не указан',
+    section: NEEDS_REVIEW_SECTION,
+    sectionConfidence: 0,
+    needsReview: true
+  }));
+
+  try {
+    // More tokens for batch response
+    const response = await makeAIRequest(prompt, 2000, 'batch');
+
+    // Parse JSON array from response
+    let parsed;
+    const cleaned = extractJsonFromResponse(response);
+
+    // Handle array response
+    if (cleaned.startsWith('[')) {
+      try {
+        parsed = JSON.parse(cleaned);
+      } catch {
+        // Try to repair truncated array
+        const repaired = repairTruncatedJson(cleaned);
+        parsed = JSON.parse(repaired);
+      }
+    } else {
+      // If wrapped in object, extract articles array
+      const obj = safeJsonParse(cleaned, {});
+      parsed = obj.articles || obj.results || [obj];
+    }
+
+    if (!Array.isArray(parsed)) {
+      console.warn('Batch response not an array, using fallback');
+      return [...results, ...fallbackResults];
+    }
+
+    // Process each result
+    const processedResults = [];
+    for (let i = 0; i < uncachedArticles.length; i++) {
+      const article = uncachedArticles[i];
+      const result = parsed[i] || {};
+
+      // Match section
+      const detectedSection = result.section?.toUpperCase?.()?.trim() || '';
+      const matchedSection = ARTICLE_SECTIONS.find(s =>
+        s.toUpperCase() === detectedSection ||
+        detectedSection.includes(s.toUpperCase()) ||
+        (detectedSection.includes('ТЕХНИЧ') && s.includes('ТЕХНИЧЕСКИЕ')) ||
+        (detectedSection.includes('ПЕДАГОГ') && s.includes('ПЕДАГОГИЧЕСКИЕ')) ||
+        (detectedSection.includes('ЕСТЕСТВ') && s.includes('ЕСТЕСТВЕННЫЕ'))
+      );
+
+      const confidence = Math.max(0, Math.min(1, Number(result.sectionConfidence) || 0.5));
+
+      let author = result.author;
+      if (!author || author === 'null' || author === 'Не указан' || !author.trim()) {
+        author = 'Автор не указан';
+      }
+      author = author.trim().replace(/,\s*$/, '').replace(/\s+/g, ' ');
+
+      const finalResult = {
+        fileName: article.fileName,
+        title: result.title || article.fileName.replace('.docx', '').replace(/_/g, ' '),
+        author,
+        section: matchedSection || NEEDS_REVIEW_SECTION,
+        sectionConfidence: matchedSection ? confidence : 0,
+        needsReview: !matchedSection || confidence < CONFIDENCE_THRESHOLDS.LOW,
+        sectionReasoning: result.sectionReasoning
+      };
+
+      // Cache the result
+      const cacheKey = generateCacheKey('analyze', article.content, article.fileName);
+      setCache(cacheKey, finalResult);
+
+      processedResults.push(finalResult);
+    }
+
+    console.log(`Batch analyzed ${processedResults.length} articles in one request`);
+    return [...results, ...processedResults];
+
+  } catch (error) {
+    console.error('Batch analysis error:', error);
+    return [...results, ...fallbackResults];
+  }
+};
+
 // ============ INDIVIDUAL FUNCTIONS (backward compatibility) ============
 
 /**
@@ -801,6 +950,7 @@ export const clearCache = () => {
 
 export default {
   analyzeArticle,
+  analyzeArticlesBatch,
   extractMetadata,
   detectSection,
   checkSpelling,

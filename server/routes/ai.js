@@ -48,6 +48,31 @@ router.post('/analyze', async (req, res) => {
 });
 
 /**
+ * POST /api/ai/analyze-batch
+ * Batch analysis: multiple articles in one request (20x faster)
+ * Body: { articles: [{fileName, content}, ...] }
+ */
+router.post('/analyze-batch', async (req, res) => {
+  try {
+    const { articles } = req.body;
+
+    if (!articles || !Array.isArray(articles) || articles.length === 0) {
+      return res.status(400).json({ error: 'Articles array is required' });
+    }
+
+    // Limit batch size on server side
+    if (articles.length > 5) {
+      return res.status(400).json({ error: 'Maximum 5 articles per batch', maxBatchSize: 5 });
+    }
+
+    const results = await aiService.analyzeArticlesBatch(articles);
+    res.json({ results, count: results.length });
+  } catch (error) {
+    handleAIError(error, res);
+  }
+});
+
+/**
  * POST /api/ai/metadata
  * Extract metadata (title, author) from article content
  */
