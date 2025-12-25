@@ -12,19 +12,21 @@ let lastRequestTime = 0;
 let consecutiveErrors = 0;
 
 const API_URL = "https://openrouter.ai/api/v1/chat/completions";
-const MODEL = "google/gemma-3-27b-it:free";
+// Updated to currently available OpenRouter free models (December 2024)
+const MODEL = "google/gemma-2-9b-it:free";
 const FALLBACK_MODELS = [
-  "qwen/qwen3-32b:free",
-  "meta-llama/llama-3.3-70b-instruct:free",
-  "google/gemma-3-12b-it:free"
+  "meta-llama/llama-3.1-8b-instruct:free",
+  "qwen/qwen-2.5-7b-instruct:free",
+  "mistralai/mistral-7b-instruct:free"
 ];
 
 // Model routing for different tasks (multi-model strategy)
+// Using reliable free models that are currently available on OpenRouter
 const MODEL_ROUTING = {
-  metadata: "google/gemma-3-12b-it:free",      // Simple task, fast model
-  section: "google/gemma-3-27b-it:free",       // Needs context understanding
-  spelling: "qwen/qwen3-32b:free",             // Good for multilingual
-  review: "meta-llama/llama-3.3-70b-instruct:free"  // Complex analysis
+  metadata: "google/gemma-2-9b-it:free",           // Simple task, fast model
+  section: "google/gemma-2-9b-it:free",            // Needs context understanding
+  spelling: "meta-llama/llama-3.1-8b-instruct:free", // Good for multilingual
+  review: "meta-llama/llama-3.1-8b-instruct:free"    // Complex analysis
 };
 
 // Cache for AI results (in-memory with TTL)
@@ -230,6 +232,7 @@ const makeAIRequest = async (prompt, maxTokens = 1000, taskType = 'general', fal
   const apiKey = process.env.OPENROUTER_API_KEY;
 
   if (!apiKey) {
+    console.error('AI Request Error: OPENROUTER_API_KEY is not set');
     throw new Error("API_KEY_MISSING");
   }
 
@@ -244,6 +247,8 @@ const makeAIRequest = async (prompt, maxTokens = 1000, taskType = 'general', fal
   }
 
   const isLastFallback = fallbackIndex >= FALLBACK_MODELS.length - 1;
+
+  console.log(`AI Request: model=${model}, task=${taskType}, fallback=${fallbackIndex}, retry=${retryCount}`);
 
   try {
     const response = await fetch(API_URL, {
@@ -268,13 +273,17 @@ const makeAIRequest = async (prompt, maxTokens = 1000, taskType = 'general', fal
       const errorData = await response.json().catch(() => ({}));
       const errorMessage = errorData.error?.message || response.statusText;
 
+      console.error(`AI Request Failed: status=${response.status}, model=${model}, error=${errorMessage}`);
+
       if (response.status === 401) {
+        console.error('API Key is invalid or expired');
         throw new Error("API_KEY_INVALID");
       }
 
       if (response.status === 429) {
         consecutiveErrors++;
         const rateLimitInfo = parseRateLimitError(errorMessage);
+        console.warn(`Rate limit hit: ${rateLimitInfo.type} - ${rateLimitInfo.message}`);
 
         if (rateLimitInfo.type === 'daily') {
           throw new Error(`RATE_LIMIT_DAILY|${rateLimitInfo.message}|${rateLimitInfo.suggestion}`);
@@ -282,11 +291,13 @@ const makeAIRequest = async (prompt, maxTokens = 1000, taskType = 'general', fal
 
         if (retryCount < 2) {
           const backoffTime = Math.pow(2, retryCount + 1) * 5000;
+          console.log(`Retrying in ${backoffTime}ms (attempt ${retryCount + 1}/2)...`);
           await new Promise(resolve => setTimeout(resolve, backoffTime));
           return makeAIRequest(prompt, maxTokens, taskType, fallbackIndex, retryCount + 1);
         }
 
         if (!isLastFallback) {
+          console.log(`Switching to fallback model: ${FALLBACK_MODELS[fallbackIndex + 1]}`);
           await new Promise(resolve => setTimeout(resolve, 5000));
           return makeAIRequest(prompt, maxTokens, taskType, fallbackIndex + 1, 0);
         }
@@ -294,7 +305,17 @@ const makeAIRequest = async (prompt, maxTokens = 1000, taskType = 'general', fal
         throw new Error(`RATE_LIMIT|${rateLimitInfo.message}|${rateLimitInfo.suggestion}`);
       }
 
-      if (!isLastFallback && (response.status === 404 || response.status >= 500)) {
+      // Handle model not found (404) or model errors (400 with specific messages)
+      if (response.status === 404 || response.status === 400) {
+        console.warn(`Model ${model} not available, trying fallback...`);
+        if (!isLastFallback) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          return makeAIRequest(prompt, maxTokens, taskType, fallbackIndex + 1, 0);
+        }
+      }
+
+      if (!isLastFallback && response.status >= 500) {
+        console.warn(`Server error for model ${model}, trying fallback...`);
         await new Promise(resolve => setTimeout(resolve, 3000));
         return makeAIRequest(prompt, maxTokens, taskType, fallbackIndex + 1, 0);
       }
@@ -305,17 +326,26 @@ const makeAIRequest = async (prompt, maxTokens = 1000, taskType = 'general', fal
     const data = await response.json();
 
     if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+      console.error('Invalid API response structure:', JSON.stringify(data).substring(0, 200));
       throw new Error('Invalid API response structure');
     }
 
     consecutiveErrors = 0;
+    console.log(`AI Request Success: model=${model}, task=${taskType}`);
     return data.choices[0].message.content;
   } catch (error) {
     if (error.message === "API_KEY_MISSING" || error.message === "API_KEY_INVALID") {
       throw error;
     }
 
-    if (!isLastFallback && error.name === 'TypeError') {
+    if (error.message?.startsWith('RATE_LIMIT')) {
+      throw error;
+    }
+
+    console.error(`AI Request Exception: ${error.message}`);
+
+    if (!isLastFallback && (error.name === 'TypeError' || error.name === 'FetchError')) {
+      console.log(`Network error, trying fallback model...`);
       return makeAIRequest(prompt, maxTokens, taskType, fallbackIndex + 1);
     }
 
