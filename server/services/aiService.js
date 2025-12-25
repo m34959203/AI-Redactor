@@ -18,6 +18,9 @@ import {
   BATCH_EXAMPLE
 } from '../config/aiConfig.js';
 
+// ============ PROMPT VERSION (A/B Testing) ============
+const PROMPT_VERSION = 'v2.1'; // Increment when prompts change
+
 // ============ METRICS TRACKING ============
 let metrics = {
   totalRequests: 0,
@@ -27,7 +30,87 @@ let metrics = {
   fallbackCount: 0,
   errors: 0,
   lastRequestTime: null,
-  avgResponseTime: 0
+  avgResponseTime: 0,
+  promptVersion: PROMPT_VERSION
+};
+
+// ============ CONFIDENCE ANALYTICS ============
+let confidenceStats = {
+  totalClassifications: 0,
+  distribution: {
+    high: 0,      // 0.8-1.0
+    medium: 0,    // 0.6-0.8
+    low: 0,       // 0.4-0.6
+    veryLow: 0,   // 0.0-0.4
+    needsReview: 0
+  },
+  bySection: {},
+  avgConfidence: 0,
+  lastUpdated: null
+};
+
+const trackConfidence = (section, confidence, needsReview) => {
+  confidenceStats.totalClassifications++;
+  confidenceStats.lastUpdated = new Date().toISOString();
+
+  // Update distribution
+  if (needsReview) {
+    confidenceStats.distribution.needsReview++;
+  } else if (confidence >= 0.8) {
+    confidenceStats.distribution.high++;
+  } else if (confidence >= 0.6) {
+    confidenceStats.distribution.medium++;
+  } else if (confidence >= 0.4) {
+    confidenceStats.distribution.low++;
+  } else {
+    confidenceStats.distribution.veryLow++;
+  }
+
+  // Track by section
+  if (!confidenceStats.bySection[section]) {
+    confidenceStats.bySection[section] = { count: 0, totalConfidence: 0, avgConfidence: 0 };
+  }
+  confidenceStats.bySection[section].count++;
+  confidenceStats.bySection[section].totalConfidence += confidence;
+  confidenceStats.bySection[section].avgConfidence =
+    confidenceStats.bySection[section].totalConfidence / confidenceStats.bySection[section].count;
+
+  // Running average
+  confidenceStats.avgConfidence =
+    (confidenceStats.avgConfidence * (confidenceStats.totalClassifications - 1) + confidence) /
+    confidenceStats.totalClassifications;
+};
+
+// ============ PROMPT/RESPONSE LOGGING ============
+const DEBUG_LOGGING = process.env.AI_DEBUG === 'true';
+const requestLog = [];
+const MAX_LOG_SIZE = 100;
+
+const logRequest = (taskType, prompt, response, metadata = {}) => {
+  if (!DEBUG_LOGGING && requestLog.length >= MAX_LOG_SIZE) return;
+
+  const entry = {
+    id: crypto.randomUUID(),
+    timestamp: new Date().toISOString(),
+    taskType,
+    promptVersion: PROMPT_VERSION,
+    promptLength: prompt.length,
+    responseLength: response?.length || 0,
+    ...metadata,
+    // Only store full prompt/response in debug mode
+    ...(DEBUG_LOGGING ? { prompt: prompt.substring(0, 2000), response: response?.substring(0, 2000) } : {})
+  };
+
+  requestLog.push(entry);
+
+  // Trim log if too large
+  if (requestLog.length > MAX_LOG_SIZE) {
+    requestLog.shift();
+  }
+
+  if (DEBUG_LOGGING) {
+    console.log(`[AI Log] ${taskType}:`, JSON.stringify(entry, null, 2));
+  }
 };
 
 const updateMetrics = (provider, responseTime, isError = false) => {
@@ -440,12 +523,24 @@ ${content.substring(0, 4000)}
       qualityScore: Math.max(1, Math.min(5, Number(result.qualityScore) || 3))
     };
 
+    // Track confidence for analytics
+    trackConfidence(finalResult.section, finalResult.sectionConfidence, finalResult.needsReview);
+
+    // Log request for debugging
+    logRequest('analyze', prompt, response, {
+      fileName,
+      section: finalResult.section,
+      confidence: finalResult.sectionConfidence,
+      needsReview: finalResult.needsReview
+    });
+
     console.log(`Analyzed "${fileName}": section=${finalResult.section}, confidence=${finalResult.sectionConfidence}`);
     setCache(cacheKey, finalResult);
     return finalResult;
 
   } catch (error) {
     console.error('Article analysis error:', error);
+    logRequest('analyze', prompt, null, { fileName, error: error.message });
     return fallback;
   }
 };
@@ -578,6 +673,9 @@ ${articlesText}
         sectionReasoning: result.sectionReasoning
       };
 
+      // Track confidence for analytics
+      trackConfidence(finalResult.section, finalResult.sectionConfidence, finalResult.needsReview);
+
       // Cache the result
       const cacheKey = generateCacheKey('analyze', article.content, article.fileName);
       setCache(cacheKey, finalResult);
@@ -585,11 +683,19 @@ ${articlesText}
       processedResults.push(finalResult);
     }
 
+    // Log batch request
+    logRequest('batch', prompt, response, {
+      articlesCount: uncachedArticles.length,
+      processedCount: processedResults.length,
+      avgConfidence: processedResults.reduce((sum, r) => sum + r.sectionConfidence, 0) / processedResults.length
+    });
+
     console.log(`Batch analyzed ${processedResults.length} articles in one request`);
     return [...results, ...processedResults];
 
   } catch (error) {
     console.error('Batch analysis error:', error);
+    logRequest('batch', prompt, null, { articlesCount: uncachedArticles.length, error: error.message });
     return [...results, ...fallbackResults];
   }
 };
@@ -981,6 +1087,64 @@ export const clearCache = () => {
   return { cleared: true, previousSize: cache.size };
 };
 
+// ============ ANALYTICS ============
+
+/**
+ * Get confidence distribution analytics
+ */
+export const getConfidenceStats = () => ({
+  ...confidenceStats,
+  promptVersion: PROMPT_VERSION,
+  distributionPercent: confidenceStats.totalClassifications > 0 ? {
+    high: Math.round((confidenceStats.distribution.high / confidenceStats.totalClassifications) * 100) + '%',
+    medium: Math.round((confidenceStats.distribution.medium / confidenceStats.totalClassifications) * 100) + '%',
+    low: Math.round((confidenceStats.distribution.low / confidenceStats.totalClassifications) * 100) + '%',
+    veryLow: Math.round((confidenceStats.distribution.veryLow / confidenceStats.totalClassifications) * 100) + '%',
+    needsReview: Math.round((confidenceStats.distribution.needsReview / confidenceStats.totalClassifications) * 100) + '%'
+  } : null
+});
+
+/**
+ * Get request log for debugging
+ */
+export const getRequestLog = (limit = 20) => ({
+  total: requestLog.length,
+  debugMode: DEBUG_LOGGING,
+  promptVersion: PROMPT_VERSION,
+  entries: requestLog.slice(-limit)
+});
+
+/**
+ * Reset analytics (for A/B testing)
+ */
+export const resetAnalytics = () => {
+  const previousStats = { ...confidenceStats };
+
+  confidenceStats.totalClassifications = 0;
+  confidenceStats.distribution = { high: 0, medium: 0, low: 0, veryLow: 0, needsReview: 0 };
+  confidenceStats.bySection = {};
+  confidenceStats.avgConfidence = 0;
+  confidenceStats.lastUpdated = null;
+
+  requestLog.length = 0;
+
+  return {
+    reset: true,
+    previousStats,
+    timestamp: new Date().toISOString()
+  };
+};
+
+/**
+ * Get prompt version info for A/B testing
+ */
+export const getPromptVersion = () => ({
+  version: PROMPT_VERSION,
+  totalClassifications: confidenceStats.totalClassifications,
+  avgConfidence: Math.round(confidenceStats.avgConfidence * 100) / 100,
+  timestamp: new Date().toISOString()
+});
+
 export default {
   analyzeArticle,
   analyzeArticlesBatch,
@@ -993,5 +1157,10 @@ export default {
   getMetrics,
   healthCheck,
   getCacheStats,
-  clearCache
+  clearCache,
+  // Analytics
+  getConfidenceStats,
+  getRequestLog,
+  resetAnalytics,
+  getPromptVersion
 };

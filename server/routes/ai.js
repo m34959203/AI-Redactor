@@ -279,4 +279,80 @@ router.get('/test', async (req, res) => {
   }
 });
 
+// ============ ANALYTICS ENDPOINTS ============
+
+/**
+ * GET /api/ai/analytics/confidence
+ * Confidence score distribution for quality monitoring
+ */
+router.get('/analytics/confidence', (req, res) => {
+  const stats = aiService.getConfidenceStats();
+  res.json({
+    ...stats,
+    timestamp: new Date().toISOString()
+  });
+});
+
+/**
+ * GET /api/ai/analytics/logs
+ * Request logs for debugging (limited)
+ */
+router.get('/analytics/logs', (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit) || 20, 100);
+  const logs = aiService.getRequestLog(limit);
+  res.json({
+    ...logs,
+    timestamp: new Date().toISOString()
+  });
+});
+
+/**
+ * GET /api/ai/analytics/version
+ * Current prompt version for A/B testing
+ */
+router.get('/analytics/version', (req, res) => {
+  const version = aiService.getPromptVersion();
+  res.json(version);
+});
+
+/**
+ * POST /api/ai/analytics/reset
+ * Reset analytics counters (for A/B testing)
+ */
+router.post('/analytics/reset', (req, res) => {
+  const result = aiService.resetAnalytics();
+  res.json(result);
+});
+
+/**
+ * GET /api/ai/analytics/summary
+ * Combined analytics summary
+ */
+router.get('/analytics/summary', (req, res) => {
+  const confidence = aiService.getConfidenceStats();
+  const metrics = aiService.getMetrics();
+  const version = aiService.getPromptVersion();
+  const cache = aiService.getCacheStats();
+
+  res.json({
+    promptVersion: version.version,
+    totalClassifications: confidence.totalClassifications,
+    avgConfidence: Math.round(confidence.avgConfidence * 100) / 100,
+    confidenceDistribution: confidence.distributionPercent,
+    bySection: confidence.bySection,
+    requests: {
+      total: metrics.totalRequests,
+      groq: metrics.groqRequests,
+      openrouter: metrics.openrouterRequests,
+      errors: metrics.errors,
+      avgResponseTime: Math.round(metrics.avgResponseTime) + 'ms'
+    },
+    cache: {
+      size: cache.size,
+      hitRate: cache.hitRate
+    },
+    timestamp: new Date().toISOString()
+  });
+});
+
 export default router;

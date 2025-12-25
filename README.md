@@ -217,6 +217,35 @@ npm start          # Production запуск
 | `/api/ai/cache/stats` | GET | Статистика кэша |
 | `/api/ai/cache` | DELETE | Очистка кэша |
 
+### Analytics (A/B Testing & Monitoring)
+| Endpoint | Method | Описание |
+|----------|--------|----------|
+| `/api/ai/analytics/summary` | GET | Полная сводка аналитики |
+| `/api/ai/analytics/confidence` | GET | Распределение confidence scores |
+| `/api/ai/analytics/version` | GET | Версия промптов (A/B тестирование) |
+| `/api/ai/analytics/logs` | GET | Логи запросов (debug mode) |
+| `/api/ai/analytics/reset` | POST | Сброс счётчиков |
+
+### Пример ответа `/api/ai/analytics/summary`
+```json
+{
+  "promptVersion": "v2.1",
+  "totalClassifications": 150,
+  "avgConfidence": 0.78,
+  "confidenceDistribution": {
+    "high": "45%",
+    "medium": "30%",
+    "low": "15%",
+    "veryLow": "5%",
+    "needsReview": "5%"
+  },
+  "bySection": {
+    "ТЕХНИЧЕСКИЕ НАУКИ": { "count": 60, "avgConfidence": 0.82 },
+    "ПЕДАГОГИЧЕСКИЕ НАУКИ": { "count": 50, "avgConfidence": 0.75 }
+  }
+}
+```
+
 ### Пример ответа `/api/ai/health`
 ```json
 {
