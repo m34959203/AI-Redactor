@@ -375,16 +375,34 @@ export const extractMetadata = async (fileName, content) => {
 
   const prompt = `Извлеки метаданные из научной статьи.
 
-ПРАВИЛА ИЗВЛЕЧЕНИЯ:
-1. Название статьи обычно в начале документа (может быть ЗАГЛАВНЫМИ БУКВАМИ)
-2. Автор(ы) указаны после названия (формат: "Фамилия И.О." или "I.O. Surname")
-3. Если несколько авторов - укажи только первого
-4. Если не найдено - верни null
+ПРАВИЛА ИЗВЛЕЧЕНИЯ НАЗВАНИЯ:
+1. Название обычно в начале после УДК/UDC
+2. Может быть ЗАГЛАВНЫМИ БУКВАМИ или обычным шрифтом
+3. Идёт ДО списка авторов
+
+ПРАВИЛА ИЗВЛЕЧЕНИЯ АВТОРА (КРИТИЧЕСКИ ВАЖНО):
+1. Автор указан ПОСЛЕ названия статьи
+2. ФОРМАТЫ АВТОРОВ (все допустимы):
+   - "Фамилия И.О." (Иванов И.И.)
+   - "И.О. Фамилия" (И.И. Иванов)
+   - "Фамилия Имя Отчество" (Иванов Иван Иванович)
+   - "Surname I.O." или "I.O. Surname" (для английских статей)
+   - Казахские имена: Әлиев Ә.М., Қасымов Қ.Б., Жұмабаев Ж.Ж.
+3. Часто ПЕРЕД именем стоит учёная степень (к.т.н., PhD, д.э.н.)
+4. Часто ПОСЛЕ имени указана организация или email
+5. Если несколько авторов через запятую - верни ПЕРВОГО
+6. Игнорируй рецензентов и редакторов
+
+ПРИМЕРЫ:
+- "УДК 004.5 АНАЛИЗ ДАННЫХ Иванов И.И., к.т.н." → author: "Иванов И.И."
+- "Методика обучения / А.Б. Петров, PhD" → author: "А.Б. Петров"
+- "ИССЛЕДОВАНИЕ РЫНКА Сидоров Иван Петрович" → author: "Сидоров И.П."
+- "Зерттеу жұмысы Әлиев Ә.М." → author: "Әлиев Ә.М."
 
 ТЕКСТ СТАТЬИ (файл "${fileName}"):
-${content.substring(0, 2500)}
+${content.substring(0, 4000)}
 
-Ответь JSON: {"title": "...", "author": "..."}`;
+Ответь ТОЛЬКО JSON: {"title": "полное название", "author": "Фамилия И.О."}`;
 
   const fallback = {
     title: fileName.replace('.docx', '').replace(/_/g, ' '),
@@ -392,12 +410,24 @@ ${content.substring(0, 2500)}
   };
 
   try {
-    const response = await makeAIRequest(prompt, 600, 'metadata');
+    const response = await makeAIRequest(prompt, 800, 'metadata');
     const metadata = safeJsonParse(response, fallback);
+
+    // Normalize author - handle null, "null", empty string, or placeholder values
+    let author = metadata.author;
+    if (!author || author === 'null' || author === 'Не указан' || author.trim() === '') {
+      author = fallback.author;
+    }
+
+    // Clean up author name - remove trailing commas, extra spaces
+    author = author.trim().replace(/,\s*$/, '').replace(/\s+/g, ' ');
+
     const result = {
       title: metadata.title || fallback.title,
-      author: metadata.author || fallback.author
+      author: author
     };
+
+    console.log(`Metadata extracted for "${fileName}": title="${result.title?.substring(0, 50)}...", author="${result.author}"`);
 
     setCache(cacheKey, result);
     return result;
