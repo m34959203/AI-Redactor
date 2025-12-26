@@ -15,7 +15,7 @@ import { useApp, useNotifications, useProcessing } from './context/AppContext';
 import { analyzeArticle, analyzeArticlesBatch, extractMetadataWithAI, checkSpelling, reviewArticle, detectArticleSection, ARTICLE_SECTIONS, retryArticleClassification, batchRetryClassification } from './services/aiApi';
 import { validatePageFile, validateArticleFile } from './utils/fileValidation';
 import useTheme from './hooks/useTheme';
-import { detectLanguage, sortArticlesBySectionAndLanguage, NEEDS_REVIEW_SECTION } from './utils/languageDetection';
+import { detectLanguage, detectArticleLanguage, sortArticlesBySectionAndLanguage, NEEDS_REVIEW_SECTION } from './utils/languageDetection';
 import { CONFIDENCE_THRESHOLDS } from './constants/sections';
 import { validatePdfRequirements, createIssue, generatePDF, generatePDFSmart, downloadPDF } from './utils/pdfGenerator';
 import { convertDocxToText } from './utils/docxConverter';
@@ -186,7 +186,8 @@ const App = () => {
 
             const title = aiResult.title || articleData.localMetadata.title;
             const author = aiResult.author || articleData.localMetadata.author;
-            const language = detectLanguage(title) || detectLanguage(articleData.content.substring(0, 500)) || 'cyrillic';
+            // Use improved language detection that checks title, author, and content
+            const language = detectArticleLanguage(title, author, articleData.content);
 
             newArticles.push({
               id: Date.now() + Math.random() + i,
@@ -213,7 +214,11 @@ const App = () => {
 
           // Fallback to local data for this batch
           for (const articleData of batch) {
-            const language = detectLanguage(articleData.localMetadata.title) || 'cyrillic';
+            const language = detectArticleLanguage(
+              articleData.localMetadata.title,
+              articleData.localMetadata.author,
+              articleData.content
+            );
             newArticles.push({
               id: Date.now() + Math.random(),
               file: articleData.file,
@@ -311,17 +316,14 @@ const App = () => {
   // Article management
   const updateArticle = (id, field, value) => {
     const updates = { [field]: value };
-    // Пересчитываем язык при изменении названия (приоритет) или автора (fallback)
-    if (field === 'title') {
+    // Пересчитываем язык при изменении названия или автора
+    if (field === 'title' || field === 'author') {
       const article = articles.find(a => a.id === id);
-      updates.language = detectLanguage(value) || detectLanguage(article?.content?.substring(0, 500)) || 'cyrillic';
-    }
-    if (field === 'author') {
-      // Если язык ещё не определён по названию - пробуем по автору
-      const article = articles.find(a => a.id === id);
-      const currentLang = detectLanguage(article?.title);
-      if (!currentLang || currentLang === 'latin') {
-        updates.language = detectLanguage(value) || detectLanguage(article?.content?.substring(0, 500)) || 'cyrillic';
+      if (article) {
+        const newTitle = field === 'title' ? value : article.title;
+        const newAuthor = field === 'author' ? value : article.author;
+        // Use improved detection that checks all sources for Kazakh
+        updates.language = detectArticleLanguage(newTitle, newAuthor, article.content);
       }
     }
     // When section is manually changed, mark as manually reviewed

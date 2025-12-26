@@ -66,6 +66,44 @@ export const detectLanguage = (text) => {
 };
 
 /**
+ * Detects language from multiple sources (title, author, content)
+ * Checks all sources for Kazakh-specific characters before falling back
+ *
+ * @param {string} title - Article title
+ * @param {string} author - Article author
+ * @param {string} content - Article content
+ * @returns {LanguageCode} - Detected language code (never null)
+ */
+export const detectArticleLanguage = (title, author, content) => {
+  // Priority: Check for Kazakh anywhere first
+  const allText = `${title || ''} ${author || ''} ${(content || '').substring(0, 2000)}`;
+
+  // If any source has Kazakh-specific characters, it's Kazakh
+  if (KAZAKH_SPECIFIC.test(allText)) {
+    return 'kazakh';
+  }
+
+  // Check for Kazakh words in combined text
+  if (KAZAKH_WORDS.test(allText)) {
+    return 'kazakh';
+  }
+
+  // Then try individual sources
+  const titleLang = detectLanguage(title);
+  if (titleLang) return titleLang;
+
+  const authorLang = detectLanguage(author);
+  if (authorLang) return authorLang;
+
+  // Check more content (2000 chars instead of 500)
+  const contentLang = detectLanguage((content || '').substring(0, 2000));
+  if (contentLang) return contentLang;
+
+  // Default to cyrillic (Russian) as most common
+  return 'cyrillic';
+};
+
+/**
  * Gets human-readable language name
  * @param {LanguageCode} code - Language code
  * @returns {string} - Language name in Russian
@@ -95,15 +133,16 @@ export const getLocale = (code) => {
 
 /**
  * Gets language priority for sorting (lower = first)
- * Order: Latin (English) → Cyrillic (Russian) → Kazakh (as per TZ requirement)
+ * Order per ТЗ: Cyrillic (Russian А-Я) → Kazakh (А-Я) → Latin (English A-Z)
+ * ТЗ: "Автоматическая сортировка: сначала кириллица (А→Я), затем латиница (A→Z)"
  * @param {LanguageCode} code - Language code
  * @returns {number} - Sort priority
  */
 const getLanguagePriority = (code) => {
   const priorities = {
-    latin: 0,     // English first (A-Z)
-    cyrillic: 1,  // Russian second (А-Я)
-    kazakh: 2     // Kazakh last (А-Я)
+    cyrillic: 0,  // Russian first (А-Я) per ТЗ
+    kazakh: 1,    // Kazakh second (А-Я, same script)
+    latin: 2      // English last (A-Z) per ТЗ
   };
   return priorities[code] ?? 3;
 };
@@ -118,7 +157,8 @@ export { NEEDS_REVIEW_SECTION };
 
 /**
  * Sorts articles by language and then by author name
- * Order: Latin (A-Z) → Cyrillic (А-Я) → Kazakh (А-Я) - as per TZ requirement
+ * Order per ТЗ: Cyrillic (А-Я) → Kazakh (А-Я) → Latin (A-Z)
+ * ТЗ: "Автоматическая сортировка: сначала кириллица (А→Я), затем латиница (A→Z)"
  *
  * @param {Array<{author: string, language: LanguageCode}>} articles - Array of articles
  * @returns {Array} - Sorted articles
@@ -147,7 +187,7 @@ export const sortArticlesByLanguage = (articles) => {
 /**
  * Sorts articles by section first, then by language, then by author name
  * Section Order: ТЕХНИЧЕСКИЕ НАУКИ → ПЕДАГОГИЧЕСКИЕ НАУКИ → ЕСТЕСТВЕННЫЕ И ЭКОНОМИЧЕСКИЕ НАУКИ
- * Language Order within section: Latin (A-Z) → Cyrillic (А-Я) → Kazakh (А-Я)
+ * Language Order within section per ТЗ: Cyrillic (А-Я) → Kazakh (А-Я) → Latin (A-Z)
  * Articles with NEEDS_REVIEW_SECTION are placed at the end
  *
  * @param {Array<{author: string, language: LanguageCode, section: string}>} articles - Array of articles

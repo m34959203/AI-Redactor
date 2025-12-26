@@ -55,13 +55,53 @@ export const extractTitleLocal = (content, fileName) => {
 };
 
 /**
+ * Extracts author from filename
+ * Patterns: "Статья Калжанова Г.М. ЖГК.docx", "Статья_Иванов_А.Б.docx"
+ *
+ * @param {string} fileName - Original file name
+ * @returns {string|null} - Extracted author or null
+ */
+const extractAuthorFromFileName = (fileName) => {
+  if (!fileName) return null;
+
+  // Remove extension and common prefixes
+  const cleanName = fileName
+    .replace(/\.docx?$/i, '')
+    .replace(/^(статья|article|ст\.?)\s*/i, '')
+    .replace(/[_]+/g, ' ')
+    .trim();
+
+  // Pattern: "Фамилия И.О." in filename (Калжанова Г.М., Нығызбаева П.Т.)
+  const pattern1 = /([А-ЯӘҒҚҢӨҰҮҺІЁа-яәғқңөұүһіёA-Za-z]+)\s+([А-ЯӘҒҚҢӨҰҮҺІЁа-яәғқңөұүһіёA-Za-z])\s*\.\s*([А-ЯӘҒҚҢӨҰҮҺІЁа-яәғқңөұүһіёA-Za-z])\s*\./;
+  const match1 = cleanName.match(pattern1);
+  if (match1) {
+    return `${match1[1]} ${match1[2]}.${match1[3]}.`;
+  }
+
+  // Pattern: "соавторы Фамилия1, Фамилия2" - take first
+  const coauthorMatch = cleanName.match(/соавторы?\s+([А-ЯӘҒҚҢӨҰҮҺІЁа-яәғқңөұүһіё]+)/i);
+  if (coauthorMatch) {
+    return coauthorMatch[1];
+  }
+
+  return null;
+};
+
+/**
  * Extracts author from content
  * Looks for patterns like "Иванов И.И." or "И.И. Иванов"
  *
  * @param {string} content - Article content
+ * @param {string} fileName - Original file name (for fallback)
  * @returns {string} - Extracted author or placeholder
  */
-export const extractAuthorLocal = (content) => {
+export const extractAuthorLocal = (content, fileName = '') => {
+  // First, try to extract from filename
+  const fileNameAuthor = extractAuthorFromFileName(fileName);
+  if (fileNameAuthor) {
+    return fileNameAuthor;
+  }
+
   if (!content || typeof content !== 'string') {
     return 'Автор не указан';
   }
@@ -70,36 +110,91 @@ export const extractAuthorLocal = (content) => {
     .map(line => line.trim())
     .filter(line => line.length > 0);
 
-  // Look in first 10 lines for author pattern
-  for (let i = 0; i < Math.min(10, lines.length); i++) {
+  // Look in first 20 lines for author pattern (increased from 10)
+  let foundTitle = false;
+
+  for (let i = 0; i < Math.min(20, lines.length); i++) {
     const line = lines[i];
 
-    // Skip title-like lines (all caps)
+    // Skip UDK/УДК lines
+    if (/^[УДКудкUDK\s\d\.\-]+$/.test(line)) continue;
+
+    // Detect title line (all caps, long)
     const upperCount = (line.match(/[А-ЯӘҒҚҢӨҰҮҺІA-Z]/g) || []).length;
     const lowerCount = (line.match(/[а-яәғқңөұүһіa-z]/g) || []).length;
-    if (upperCount > lowerCount * 2 && line.length > 20) continue;
+    const isTitle = upperCount > lowerCount * 2 && line.length > 20;
 
-    // Pattern 1: "Фамилия И.О." or "Фамилия И.О., Фамилия2 И.О."
-    const pattern1 = /([А-ЯӘҒҚҢӨҰҮҺІЁа-яәғқңөұүһіёA-Za-z]+)\s+([А-ЯӘҒҚҢӨҰҮҺІЁа-яәғқңөұүһіёA-Za-z])\s*\.\s*([А-ЯӘҒҚҢӨҰҮҺІЁа-яәғқңөұүһіёA-Za-z])\s*\./;
+    if (isTitle) {
+      foundTitle = true;
+      continue; // Skip title, author is usually after
+    }
+
+    // Only look for author AFTER we found the title
+    // (or in first few lines if no title detected yet)
+    if (!foundTitle && i > 5) continue;
+
+    // Pattern 1: "Фамилия И.О." (Калжанова Г.М., Нығызбаева П.Т.)
+    const pattern1 = /([А-ЯӘҒҚҢӨҰҮҺІЁа-яәғқңөұүһіёA-Za-z]{2,})\s+([А-ЯӘҒҚҢӨҰҮҺІЁа-яәғқңөұүһіёA-Za-z])\s*\.\s*([А-ЯӘҒҚҢӨҰҮҺІЁа-яәғқңөұүһіёA-Za-z])\s*\./;
     const match1 = line.match(pattern1);
-    if (match1) {
-      // Return first author
+    if (match1 && match1[1].length >= 2) {
       return `${match1[1]} ${match1[2]}.${match1[3]}.`;
     }
 
-    // Pattern 2: "И.О. Фамилия"
-    const pattern2 = /([А-ЯӘҒҚҢӨҰҮҺІЁа-яәғқңөұүһіёA-Za-z])\s*\.\s*([А-ЯӘҒҚҢӨҰҮҺІЁа-яәғқңөұүһіёA-Za-z])\s*\.\s*([А-ЯӘҒҚҢӨҰҮҺІЁа-яәғқңөұүһіёA-Za-z]+)/;
+    // Pattern 2: "И.О. Фамилия" (А.Б. Иванов)
+    const pattern2 = /([А-ЯӘҒҚҢӨҰҮҺІЁа-яәғқңөұүһіёA-Za-z])\s*\.\s*([А-ЯӘҒҚҢӨҰҮҺІЁа-яәғқңөұүһіёA-Za-z])\s*\.\s*([А-ЯӘҒҚҢӨҰҮҺІЁа-яәғқңөұүһіёA-Za-z]{2,})/;
     const match2 = line.match(pattern2);
-    if (match2) {
+    if (match2 && match2[3].length >= 2) {
       return `${match2[3]} ${match2[1]}.${match2[2]}.`;
     }
 
-    // Pattern 3: Line with "Автор:" or "Author:"
+    // Pattern 3: Full name "Фамилия Имя Отчество" (Иванов Андрей Борисович)
+    // Look for 3 capitalized words in a row
+    const pattern3 = /([А-ЯӘҒҚҢӨҰҮҺІЁа-яәғқңөұүһіёA-Za-z]{2,})\s+([А-ЯӘҒҚҢӨҰҮҺІЁа-яәғқңөұүһіёA-Za-z]{2,})\s+([А-ЯӘҒҚҢӨҰҮҺІЁа-яәғқңөұүһіёA-Za-z]{2,})/;
+    const match3 = line.match(pattern3);
+    if (match3) {
+      // Check that all three words start with uppercase
+      const [, w1, w2, w3] = match3;
+      const isName = /^[А-ЯӘҒҚҢӨҰҮҺІЁA-Z]/.test(w1) &&
+                     /^[А-ЯӘҒҚҢӨҰҮҺІЁA-Z]/.test(w2) &&
+                     /^[А-ЯӘҒҚҢӨҰҮҺІЁA-Z]/.test(w3);
+      // Avoid matching common phrases
+      const notName = /^(для|при|что|как|это|или|так|все|они|был|она|его|мы|вы)/i.test(w1);
+      if (isName && !notName && w1.length <= 20 && w2.length <= 15) {
+        return `${w1} ${w2[0]}.${w3[0]}.`;
+      }
+    }
+
+    // Pattern 4: "Автор:" or "Author:" label
     if (/^(Автор|Author|Авторы|Authors)\s*:/i.test(line)) {
       const authorPart = line.replace(/^(Автор|Author|Авторы|Authors)\s*:\s*/i, '').trim();
       if (authorPart.length > 2) {
-        // Get first author if multiple
         return authorPart.split(/[,;]/)[0].trim();
+      }
+    }
+
+    // Pattern 5: Line with email suggests author line (name@email.com)
+    if (line.includes('@') && foundTitle) {
+      // Try to extract name before email
+      const beforeEmail = line.split(/\s*[\w.-]+@[\w.-]+/)[0].trim();
+      if (beforeEmail.length > 3 && beforeEmail.length < 50) {
+        const nameMatch = beforeEmail.match(/([А-ЯӘҒҚҢӨҰҮҺІЁа-яәғқңөұүһіёA-Za-z\s.]+)/);
+        if (nameMatch) {
+          return nameMatch[1].trim().split(/[,;]/)[0].trim();
+        }
+      }
+    }
+
+    // Pattern 6: Short line after title (likely author, 2-4 words, not a sentence)
+    if (foundTitle && line.length < 60 && line.length > 5) {
+      const wordCount = line.split(/\s+/).length;
+      if (wordCount >= 2 && wordCount <= 5 && !line.includes('.') || line.match(/\.\s*[А-ЯA-Z]\./)) {
+        // Doesn't look like a sentence (no period at end, or has initials)
+        if (!/[.!?]$/.test(line) || /[А-ЯA-Z]\.\s*[А-ЯA-Z]\./.test(line)) {
+          // Check it contains Cyrillic name-like words
+          if (/[А-ЯӘҒҚҢӨҰҮҺІЁа-яәғқңөұүһіё]{2,}/.test(line)) {
+            return line.split(/[,;]/)[0].trim();
+          }
+        }
       }
     }
   }
@@ -117,7 +212,7 @@ export const extractAuthorLocal = (content) => {
 export const extractMetadataLocal = (fileName, content) => {
   return {
     title: extractTitleLocal(content, fileName),
-    author: extractAuthorLocal(content)
+    author: extractAuthorLocal(content, fileName)
   };
 };
 
