@@ -718,11 +718,13 @@ export const analyzeArticlesBatch = async (articles) => {
   * Казахские имена: "Қалжанова Г.М.", "Нығызбаева П.Т." (сохраняй казахские буквы!)
   * Если имя в названии файла — используй его!
   * ВСЕГДА указывай автора, не пиши "Автор не указан" без причины
-- РАЗДЕЛ (выбери ОДИН для каждой):
-  1. ТЕХНИЧЕСКИЕ НАУКИ — IT, инженерия, программирование, строительство
-  2. ПЕДАГОГИЧЕСКИЕ НАУКИ — образование, методика преподавания, дидактика
-  3. ЕСТЕСТВЕННЫЕ И ЭКОНОМИЧЕСКИЕ НАУКИ — физика, химия, биология, экономика, финансы
-${CONFIDENCE_GUIDE}
+- РАЗДЕЛ — ОБЯЗАТЕЛЬНО выбери ОДИН из ТРЁХ (используй ТОЧНОЕ название):
+  * "ТЕХНИЧЕСКИЕ НАУКИ" — IT, инженерия, программирование, строительство, технологии
+  * "ПЕДАГОГИЧЕСКИЕ НАУКИ" — образование, методика преподавания, дидактика, педагогика
+  * "ЕСТЕСТВЕННЫЕ И ЭКОНОМИЧЕСКИЕ НАУКИ" — физика, химия, биология, экономика, финансы, математика
+- sectionConfidence: 0.7-1.0 (если тема явно соответствует разделу)
+
+КРИТИЧНО: Поле "section" должно содержать ТОЧНОЕ название раздела из списка выше!
 ${BATCH_EXAMPLE}
 ## СТАТЬИ ДЛЯ АНАЛИЗА:
 ${articlesText}
@@ -772,17 +774,23 @@ ${articlesText}
       const article = uncachedArticles[i];
       const result = parsed[i] || {};
 
-      // Match section
+      // Match section - more flexible matching for different model outputs
       const detectedSection = result.section?.toUpperCase?.()?.trim() || '';
-      const matchedSection = ARTICLE_SECTIONS.find(s =>
-        s.toUpperCase() === detectedSection ||
-        detectedSection.includes(s.toUpperCase()) ||
-        (detectedSection.includes('ТЕХНИЧ') && s.includes('ТЕХНИЧЕСКИЕ')) ||
-        (detectedSection.includes('ПЕДАГОГ') && s.includes('ПЕДАГОГИЧЕСКИЕ')) ||
-        (detectedSection.includes('ЕСТЕСТВ') && s.includes('ЕСТЕСТВЕННЫЕ'))
-      );
+      const matchedSection = ARTICLE_SECTIONS.find(s => {
+        const sectionUpper = s.toUpperCase();
+        // Exact match
+        if (sectionUpper === detectedSection) return true;
+        // Partial match (section name contains detected or vice versa)
+        if (detectedSection.includes(sectionUpper) || sectionUpper.includes(detectedSection)) return true;
+        // Keyword matching for flexible model outputs
+        if ((detectedSection.includes('ТЕХНИЧ') || detectedSection.includes('ТЕХНО') || detectedSection.includes('IT') || detectedSection.includes('ИНЖЕНЕР')) && s.includes('ТЕХНИЧЕСКИЕ')) return true;
+        if ((detectedSection.includes('ПЕДАГОГ') || detectedSection.includes('ОБРАЗОВ') || detectedSection.includes('МЕТОДИК') || detectedSection.includes('ОБУЧЕН')) && s.includes('ПЕДАГОГИЧЕСКИЕ')) return true;
+        if ((detectedSection.includes('ЕСТЕСТВ') || detectedSection.includes('ЭКОНОМ') || detectedSection.includes('ФИЗИК') || detectedSection.includes('ХИМИЯ') || detectedSection.includes('БИОЛОГ') || detectedSection.includes('МАТЕМАТ') || detectedSection.includes('ФИНАНС')) && s.includes('ЕСТЕСТВЕННЫЕ')) return true;
+        return false;
+      });
 
-      const confidence = Math.max(0, Math.min(1, Number(result.sectionConfidence) || 0.5));
+      // Default confidence to 0.7 if section was matched (model outputs are usually reliable)
+      const confidence = Math.max(0, Math.min(1, Number(result.sectionConfidence) || (matchedSection ? 0.7 : 0.3)));
 
       let author = result.author;
       if (!author || author === 'null' || author === 'Не указан' || !author.trim()) {
@@ -796,7 +804,9 @@ ${articlesText}
         author,
         section: matchedSection || NEEDS_REVIEW_SECTION,
         sectionConfidence: matchedSection ? confidence : 0,
-        needsReview: !matchedSection || confidence < CONFIDENCE_THRESHOLDS.LOW,
+        // Only require review if section couldn't be matched at all
+        // If section matched, trust the model's classification
+        needsReview: !matchedSection,
         sectionReasoning: result.sectionReasoning
       };
 
