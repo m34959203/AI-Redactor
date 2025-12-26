@@ -320,9 +320,16 @@ const makeAIRequest = async (prompt, maxTokens = 1000, taskType = 'general', opt
   // Pass taskType to use appropriate delay (spelling gets longer delay)
   await waitForRateLimit(currentProviderName, taskType);
 
-  // Select model
+  // Select model - use faster 8B model for spelling (higher TPM limit)
   const allModels = [provider.model, ...provider.fallbackModels];
-  const model = allModels[Math.min(modelIndex, allModels.length - 1)];
+  let effectiveModelIndex = modelIndex;
+
+  // For spelling tasks, prefer the faster 8B model (has 250K TPM vs 12K for 70B)
+  if (taskType === 'spelling' && provider.name === 'Groq' && provider.fallbackModels.length > 0) {
+    effectiveModelIndex = Math.max(modelIndex, 1); // Use fallback model (8B)
+  }
+
+  const model = allModels[Math.min(effectiveModelIndex, allModels.length - 1)];
   const isLastModel = modelIndex >= allModels.length - 1;
 
   console.log(`AI Request: provider=${provider.name}, model=${model}, task=${taskType}, retry=${retryCount}`);

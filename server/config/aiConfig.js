@@ -54,11 +54,11 @@ export const PROVIDERS = {
     name: 'Groq',
     url: 'https://api.groq.com/openai/v1/chat/completions',
     model: 'llama-3.3-70b-versatile',
-    // Fallback models (Dec 2024): llama3-70b and llama3-8b are still available
-    // llama-3.1-70b-versatile and gemma2-9b-it are DECOMMISSIONED!
-    fallbackModels: ['llama3-70b-8192', 'llama3-8b-8192'],
+    // Fallback: llama-3.1-8b-instant (faster, 560 T/s, less TPM usage)
+    // See https://console.groq.com/docs/models for current models
+    fallbackModels: ['llama-3.1-8b-instant'],
     keyEnv: 'GROQ_API_KEY',
-    // Free tier: 12000 TPM - use delays to avoid exhaustion
+    // Free tier: ~12K TPM for 70b model. Paid: 300K TPM
     rateLimit: { requestsPerMin: 30, tokensPerMin: 12000 },
     headers: (apiKey) => ({
       'Content-Type': 'application/json',
