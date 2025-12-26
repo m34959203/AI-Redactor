@@ -776,6 +776,10 @@ ${articlesText}
 
       // Match section - more flexible matching for different model outputs
       const detectedSection = result.section?.toUpperCase?.()?.trim() || '';
+
+      // DEBUG: Log what the model returned for troubleshooting
+      console.log(`Section matching for "${article.fileName}": model returned "${result.section}" -> normalized: "${detectedSection}"`);
+
       const matchedSection = ARTICLE_SECTIONS.find(s => {
         const sectionUpper = s.toUpperCase();
         // Exact match
@@ -788,6 +792,9 @@ ${articlesText}
         if ((detectedSection.includes('ЕСТЕСТВ') || detectedSection.includes('ЭКОНОМ') || detectedSection.includes('ФИЗИК') || detectedSection.includes('ХИМИЯ') || detectedSection.includes('БИОЛОГ') || detectedSection.includes('МАТЕМАТ') || detectedSection.includes('ФИНАНС')) && s.includes('ЕСТЕСТВЕННЫЕ')) return true;
         return false;
       });
+
+      // DEBUG: Log match result
+      console.log(`Section match result for "${article.fileName}": ${matchedSection ? `MATCHED -> "${matchedSection}"` : 'NO MATCH -> ТРЕБУЕТ КЛАССИФИКАЦИИ'}`);
 
       // Default confidence to 0.7 if section was matched (model outputs are usually reliable)
       const confidence = Math.max(0, Math.min(1, Number(result.sectionConfidence) || (matchedSection ? 0.7 : 0.3)));
