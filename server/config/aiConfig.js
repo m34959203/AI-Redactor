@@ -20,7 +20,8 @@ export const BATCH_CONFIG = {
   MAX_TOKENS_SINGLE: 600,
 
   // Maximum tokens for spelling check (reduced for TPM)
-  MAX_TOKENS_SPELLING: 800
+  // Spelling now uses OpenRouter, so we can use fewer tokens
+  MAX_TOKENS_SPELLING: 600
 };
 
 // ============ RATE LIMITING ============
@@ -33,8 +34,9 @@ export const RATE_LIMIT_CONFIG = {
   // Delay after hitting rate limit (TPM resets per minute)
   DELAY_AFTER_429: 25000,     // 25s wait on 429
 
-  // Delay between spelling checks (prevent TPM exhaustion)
-  SPELLING_DELAY: 8000,       // 8s between spell checks
+  // Delay between spelling checks
+  // Now uses OpenRouter (200 req/day), so 3s is enough
+  SPELLING_DELAY: 3000,       // 3s between spell checks (OpenRouter)
 
   // Retry configuration
   MAX_RETRIES: 2,             // Reduced - fail fast, switch provider
@@ -58,7 +60,9 @@ export const PROVIDERS = {
     // See https://console.groq.com/docs/models for current models
     fallbackModels: ['llama-3.1-8b-instant'],
     keyEnv: 'GROQ_API_KEY',
-    // Free tier: ~12K TPM for 70b model. Paid: 300K TPM
+    // Free tier TPM limits (NOT paid tier!):
+    // - llama-3.3-70b-versatile: 12K TPM
+    // - llama-3.1-8b-instant: 6K TPM
     rateLimit: { requestsPerMin: 30, tokensPerMin: 12000 },
     headers: (apiKey) => ({
       'Content-Type': 'application/json',

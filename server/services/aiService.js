@@ -320,14 +320,14 @@ const makeAIRequest = async (prompt, maxTokens = 1000, taskType = 'general', opt
   // Pass taskType to use appropriate delay (spelling gets longer delay)
   await waitForRateLimit(currentProviderName, taskType);
 
-  // Select model - use faster 8B model for spelling (higher TPM limit)
+  // Select model
   const allModels = [provider.model, ...provider.fallbackModels];
   let effectiveModelIndex = modelIndex;
 
-  // For spelling tasks, prefer the faster 8B model (has 250K TPM vs 12K for 70B)
-  if (taskType === 'spelling' && provider.name === 'Groq' && provider.fallbackModels.length > 0) {
-    effectiveModelIndex = Math.max(modelIndex, 1); // Use fallback model (8B)
-  }
+  // NOTE: Both Groq models have low TPM on free tier:
+  // - llama-3.3-70b-versatile: 12K TPM
+  // - llama-3.1-8b-instant: 6K TPM (NOT 250K - that's paid tier!)
+  // For spelling, we use OpenRouter when available (see checkSpelling function)
 
   const model = allModels[Math.min(effectiveModelIndex, allModels.length - 1)];
   const isLastModel = modelIndex >= allModels.length - 1;
@@ -848,8 +848,12 @@ ${content.substring(0, 2500)}
 
 /**
  * Check spelling
+ * Uses OpenRouter when available (200 req/day) to avoid Groq's 6K TPM limit
  */
 export const checkSpelling = async (content, fileName) => {
+  // Reduced from 4000 to 2000 chars to minimize token usage
+  const textToCheck = content.substring(0, 2000);
+
   const prompt = `## ЗАДАЧА
 Найди ТОЛЬКО реальные орфографические ОШИБКИ в тексте.
 
@@ -876,7 +880,7 @@ export const checkSpelling = async (content, fileName) => {
 Если ошибок нет: {"errors": [], "totalErrors": 0}
 
 ## ТЕКСТ:
-${content.substring(0, 4000)}`;
+${textToCheck}`;
 
   const fallback = { errors: [], totalErrors: 0 };
 
@@ -885,8 +889,13 @@ ${content.substring(0, 4000)}`;
 
   try {
     // Use configured token limit for spelling to conserve TPM
-    const maxTokens = BATCH_CONFIG.MAX_TOKENS_SPELLING || 1000;
-    const response = await makeAIRequest(prompt, maxTokens, 'spelling');
+    const maxTokens = BATCH_CONFIG.MAX_TOKENS_SPELLING || 600;
+
+    // CRITICAL: Use OpenRouter for spelling when available
+    // Groq has only 6K TPM for 8B model, causing constant 429 errors
+    // OpenRouter has 200 req/day which is enough for spell checking
+    const useOpenRouter = !!process.env.OPENROUTER_API_KEY;
+    const response = await makeAIRequest(prompt, maxTokens, 'spelling', { forceFallback: useOpenRouter });
     const result = safeJsonParse(response, fallback);
 
     const validErrors = Array.isArray(result.errors)
