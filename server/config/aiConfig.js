@@ -6,33 +6,39 @@
 // ============ BATCH PROCESSING ============
 export const BATCH_CONFIG = {
   // Maximum articles per batch request
-  // Reduced from 5 to 3 to avoid hitting 12000 TPM limit
-  BATCH_SIZE: 3,
+  // Reduced to 2 to stay within 12000 TPM limit
+  BATCH_SIZE: 2,
 
-  // Maximum characters to send per article (prevents token overflow)
-  // Reduced from 1500 to 1200 for safer TPM margins
-  MAX_CHARS_PER_ARTICLE: 1200,
+  // Maximum characters to send per article
+  // Reduced to 1000 (~250 tokens) for safer TPM margins
+  MAX_CHARS_PER_ARTICLE: 1000,
 
   // Maximum tokens for batch response
-  MAX_TOKENS_BATCH: 1500,
+  MAX_TOKENS_BATCH: 1000,
 
   // Maximum tokens for single analysis
-  MAX_TOKENS_SINGLE: 800
+  MAX_TOKENS_SINGLE: 600,
+
+  // Maximum tokens for spelling check (reduced for TPM)
+  MAX_TOKENS_SPELLING: 800
 };
 
 // ============ RATE LIMITING ============
 export const RATE_LIMIT_CONFIG = {
   // Delay between requests (ms)
-  // Increased to 4s to allow TPM quota recovery (12000 TPM limit)
-  GROQ_DELAY: 4000,           // 30 req/min but TPM limited, use 4s for safety
+  // CRITICAL: 12000 TPM needs ~6s between requests for recovery
+  GROQ_DELAY: 6000,           // 6s for TPM recovery (12000 TPM / ~2000 tokens per req)
   OPENROUTER_DELAY: 5000,     // 20 req/min = 3s, but we use 5s for safety
 
-  // Delay after hitting rate limit (increased for TPM recovery)
-  DELAY_AFTER_429: 15000,
+  // Delay after hitting rate limit (TPM resets per minute)
+  DELAY_AFTER_429: 25000,     // 25s wait on 429
+
+  // Delay between spelling checks (prevent TPM exhaustion)
+  SPELLING_DELAY: 8000,       // 8s between spell checks
 
   // Retry configuration
-  MAX_RETRIES: 3,
-  BACKOFF_MULTIPLIER: 4000    // exponential backoff base (increased)
+  MAX_RETRIES: 2,             // Reduced - fail fast, switch provider
+  BACKOFF_MULTIPLIER: 6000    // exponential backoff base
 };
 
 // ============ CACHE ============
@@ -48,10 +54,11 @@ export const PROVIDERS = {
     name: 'Groq',
     url: 'https://api.groq.com/openai/v1/chat/completions',
     model: 'llama-3.3-70b-versatile',
-    // Updated fallback models - mixtral deprecated Dec 2024
-    fallbackModels: ['llama-3.1-70b-versatile', 'gemma2-9b-it'],
+    // Fallback: llama-3.1-8b-instant (faster, 560 T/s, less TPM usage)
+    // See https://console.groq.com/docs/models for current models
+    fallbackModels: ['llama-3.1-8b-instant'],
     keyEnv: 'GROQ_API_KEY',
-    // Free tier: 12000 TPM for 70b, need longer delays
+    // Free tier: ~12K TPM for 70b model. Paid: 300K TPM
     rateLimit: { requestsPerMin: 30, tokensPerMin: 12000 },
     headers: (apiKey) => ({
       'Content-Type': 'application/json',
