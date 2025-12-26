@@ -621,16 +621,16 @@ ${content.substring(0, 4000)}
     }
     author = author.trim().replace(/,\s*$/, '').replace(/\s+/g, ' ');
 
-    // Process section
+    // Process section - skip matching if section is empty/undefined
     const detectedSection = result.section?.toUpperCase?.()?.trim() || '';
-    const matchedSection = ARTICLE_SECTIONS.find(s =>
+    const matchedSection = detectedSection.length > 0 ? ARTICLE_SECTIONS.find(s =>
       s.toUpperCase() === detectedSection ||
       s.toUpperCase().includes(detectedSection.replace(/\s+/g, ' ').trim()) ||
       detectedSection.includes(s.toUpperCase()) ||
       (detectedSection.includes('ТЕХНИЧ') && s.includes('ТЕХНИЧЕСКИЕ')) ||
       (detectedSection.includes('ПЕДАГОГ') && s.includes('ПЕДАГОГИЧЕСКИЕ')) ||
       (detectedSection.includes('ЕСТЕСТВ') && s.includes('ЕСТЕСТВЕННЫЕ'))
-    );
+    ) : null;
 
     const confidence = Math.max(0, Math.min(1, Number(result.sectionConfidence) || 0.5));
 
@@ -780,7 +780,8 @@ ${articlesText}
       // DEBUG: Log what the model returned for troubleshooting
       console.log(`Section matching for "${article.fileName}": model returned "${result.section}" -> normalized: "${detectedSection}"`);
 
-      const matchedSection = ARTICLE_SECTIONS.find(s => {
+      // If model returned empty/undefined section, skip matching and return null
+      const matchedSection = detectedSection.length > 0 ? ARTICLE_SECTIONS.find(s => {
         const sectionUpper = s.toUpperCase();
         // Exact match
         if (sectionUpper === detectedSection) return true;
@@ -791,7 +792,7 @@ ${articlesText}
         if ((detectedSection.includes('ПЕДАГОГ') || detectedSection.includes('ОБРАЗОВ') || detectedSection.includes('МЕТОДИК') || detectedSection.includes('ОБУЧЕН')) && s.includes('ПЕДАГОГИЧЕСКИЕ')) return true;
         if ((detectedSection.includes('ЕСТЕСТВ') || detectedSection.includes('ЭКОНОМ') || detectedSection.includes('ФИЗИК') || detectedSection.includes('ХИМИЯ') || detectedSection.includes('БИОЛОГ') || detectedSection.includes('МАТЕМАТ') || detectedSection.includes('ФИНАНС')) && s.includes('ЕСТЕСТВЕННЫЕ')) return true;
         return false;
-      });
+      }) : null;
 
       // DEBUG: Log match result
       console.log(`Section match result for "${article.fileName}": ${matchedSection ? `MATCHED -> "${matchedSection}"` : 'NO MATCH -> ТРЕБУЕТ КЛАССИФИКАЦИИ'}`);
@@ -937,11 +938,12 @@ ${content.substring(0, 2500)}
     if (!result?.section) return fallbackResult;
 
     const detectedSection = result.section?.toUpperCase?.()?.trim() || '';
-    const matchedSection = ARTICLE_SECTIONS.find(s =>
+    // Skip matching if section is empty/undefined
+    const matchedSection = detectedSection.length > 0 ? ARTICLE_SECTIONS.find(s =>
       s.toUpperCase() === detectedSection ||
       s.toUpperCase().includes(detectedSection) ||
       detectedSection.includes(s.toUpperCase())
-    );
+    ) : null;
 
     const confidence = Math.max(0, Math.min(1, Number(result.confidence) || 0.5));
 
@@ -1138,14 +1140,15 @@ ${content.substring(0, 3500)}
       if (!result?.section) continue;
 
       const detectedSection = result.section?.toUpperCase?.()?.trim() || '';
-      const matchedSection = ARTICLE_SECTIONS.find(s => {
+      // Skip matching if section is empty/undefined
+      const matchedSection = detectedSection.length > 0 ? ARTICLE_SECTIONS.find(s => {
         const norm = s.toUpperCase().replace(/\s+/g, ' ').trim();
         const det = detectedSection.replace(/\s+/g, ' ').trim();
         return norm === det || norm.includes(det) || det.includes(norm) ||
           (det.includes('ТЕХНИЧ') && s.includes('ТЕХНИЧЕСКИЕ')) ||
           (det.includes('ПЕДАГОГ') && s.includes('ПЕДАГОГИЧЕСКИЕ')) ||
           (det.includes('ЕСТЕСТВ') && s.includes('ЕСТЕСТВЕННЫЕ'));
-      });
+      }) : null;
 
       if (matchedSection) {
         return {
