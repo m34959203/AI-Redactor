@@ -142,15 +142,25 @@ let lastRequestTime = 0;
 let consecutiveErrors = 0;
 let currentProviderName = null;
 
-const waitForRateLimit = async (providerName) => {
+const waitForRateLimit = async (providerName, taskType = 'general') => {
   const now = Date.now();
-  let baseDelay = providerName === 'groq' ? RATE_LIMIT_CONFIG.GROQ_DELAY : RATE_LIMIT_CONFIG.OPENROUTER_DELAY;
-  if (consecutiveErrors > 0) baseDelay = RATE_LIMIT_CONFIG.DELAY_AFTER_429;
+
+  // Use longer delay for spelling checks to conserve TPM
+  let baseDelay;
+  if (consecutiveErrors > 0) {
+    baseDelay = RATE_LIMIT_CONFIG.DELAY_AFTER_429;
+  } else if (taskType === 'spelling') {
+    baseDelay = RATE_LIMIT_CONFIG.SPELLING_DELAY || RATE_LIMIT_CONFIG.GROQ_DELAY;
+  } else if (providerName === 'groq') {
+    baseDelay = RATE_LIMIT_CONFIG.GROQ_DELAY;
+  } else {
+    baseDelay = RATE_LIMIT_CONFIG.OPENROUTER_DELAY;
+  }
 
   const timeSinceLastRequest = now - lastRequestTime;
   if (timeSinceLastRequest < baseDelay) {
     const waitTime = baseDelay - timeSinceLastRequest;
-    console.log(`Rate limiting (${providerName}): waiting ${waitTime}ms...`);
+    console.log(`Rate limiting (${providerName}/${taskType}): waiting ${waitTime}ms...`);
     await new Promise(resolve => setTimeout(resolve, waitTime));
   }
   lastRequestTime = Date.now();
@@ -307,7 +317,8 @@ const makeAIRequest = async (prompt, maxTokens = 1000, taskType = 'general', opt
   const { provider, apiKey } = activeConfig;
   currentProviderName = provider.name.toLowerCase();
 
-  await waitForRateLimit(currentProviderName);
+  // Pass taskType to use appropriate delay (spelling gets longer delay)
+  await waitForRateLimit(currentProviderName, taskType);
 
   // Select model
   const allModels = [provider.model, ...provider.fallbackModels];
@@ -866,7 +877,9 @@ ${content.substring(0, 4000)}`;
   const KAZAKH_PATTERN = /[ӘәҒғҚқҢңӨөҰұҮүҺһІі]/;
 
   try {
-    const response = await makeAIRequest(prompt, 2000, 'spelling');
+    // Use configured token limit for spelling to conserve TPM
+    const maxTokens = BATCH_CONFIG.MAX_TOKENS_SPELLING || 1000;
+    const response = await makeAIRequest(prompt, maxTokens, 'spelling');
     const result = safeJsonParse(response, fallback);
 
     const validErrors = Array.isArray(result.errors)
