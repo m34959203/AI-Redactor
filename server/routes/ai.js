@@ -24,6 +24,16 @@ const handleAIError = (error, res) => {
     const [, message, suggestion] = error.message.split('|');
     return res.status(429).json({ error: message, suggestion, code: 'RATE_LIMIT' });
   }
+  // Handle when ALL free AI providers are exhausted
+  if (error.message?.startsWith('ALL_PROVIDERS_EXHAUSTED')) {
+    const [, message, suggestion] = error.message.split('|');
+    return res.status(429).json({
+      error: message,
+      suggestion,
+      code: 'ALL_PROVIDERS_EXHAUSTED',
+      providers: aiService.getProvidersStatus()
+    });
+  }
 
   res.status(500).json({ error: error.message });
 };
@@ -223,6 +233,19 @@ router.get('/status', (req, res) => {
   const status = aiService.getStatus();
   res.json({
     ...status,
+    timestamp: new Date().toISOString()
+  });
+});
+
+/**
+ * GET /api/ai/providers
+ * Check if AI providers are exhausted (for user notification)
+ * Returns status of each provider and exhaustion message
+ */
+router.get('/providers', (req, res) => {
+  const providersStatus = aiService.getProvidersStatus();
+  res.json({
+    ...providersStatus,
     timestamp: new Date().toISOString()
   });
 });
