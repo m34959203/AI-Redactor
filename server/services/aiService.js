@@ -127,6 +127,10 @@ const updateMetrics = (provider, responseTime, isError = false) => {
 
 // Get active provider (Groq primary, OpenRouter fallback)
 const getActiveProvider = () => {
+  // Check if Groq daily limit was hit - use OpenRouter instead
+  if (checkGroqDailyLimit() && process.env.OPENROUTER_API_KEY) {
+    return { provider: PROVIDERS.openrouter, apiKey: process.env.OPENROUTER_API_KEY };
+  }
   if (process.env.GROQ_API_KEY) {
     return { provider: PROVIDERS.groq, apiKey: process.env.GROQ_API_KEY };
   }
@@ -141,6 +145,27 @@ const getActiveProvider = () => {
 let lastRequestTime = 0;
 let consecutiveErrors = 0;
 let currentProviderName = null;
+
+// Track Groq daily limit (100K TPD on free tier)
+// When hit, switch all requests to OpenRouter until reset
+let groqDailyLimitHit = false;
+let groqDailyLimitResetTime = 0;
+
+const checkGroqDailyLimit = () => {
+  // Reset if 1 hour has passed since limit was hit
+  if (groqDailyLimitHit && Date.now() > groqDailyLimitResetTime) {
+    console.log('Groq daily limit reset - trying Groq again');
+    groqDailyLimitHit = false;
+  }
+  return groqDailyLimitHit;
+};
+
+const setGroqDailyLimitHit = () => {
+  groqDailyLimitHit = true;
+  // Reset after 1 hour (Groq resets daily, but we try again after 1h)
+  groqDailyLimitResetTime = Date.now() + 60 * 60 * 1000;
+  console.log('Groq daily limit hit - switching to OpenRouter for 1 hour');
+};
 
 const waitForRateLimit = async (providerName, taskType = 'general') => {
   const now = Date.now();
@@ -369,8 +394,18 @@ const makeAIRequest = async (prompt, maxTokens = 1000, taskType = 'general', opt
         const rateLimitInfo = parseRateLimitError(errorMessage, provider.name.toLowerCase());
         console.warn(`Rate limit (${provider.name}): ${rateLimitInfo.type}`);
 
-        // Try next model in same provider
-        if (!isLastModel) {
+        // CRITICAL: If Groq daily limit (TPD) hit, remember it for future requests
+        if (rateLimitInfo.type === 'daily' && provider.name === 'Groq') {
+          setGroqDailyLimitHit();
+          // Switch to OpenRouter immediately for this and all future requests
+          if (process.env.OPENROUTER_API_KEY) {
+            console.log('Groq daily limit - switching to OpenRouter...');
+            return makeAIRequest(prompt, maxTokens, taskType, { forceFallback: true });
+          }
+        }
+
+        // Try next model in same provider (only for TPM limits, not daily)
+        if (!isLastModel && rateLimitInfo.type !== 'daily') {
           console.log(`Trying fallback model: ${allModels[modelIndex + 1]}`);
           await new Promise(r => setTimeout(r, 3000));
           return makeAIRequest(prompt, maxTokens, taskType, { ...options, modelIndex: modelIndex + 1, retryCount: 0 });
