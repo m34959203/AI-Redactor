@@ -151,6 +151,10 @@ let currentProviderName = null;
 let groqDailyLimitHit = false;
 let groqDailyLimitResetTime = 0;
 
+// Track OpenRouter daily limit (200 req/day on free tier)
+let openrouterDailyLimitHit = false;
+let openrouterDailyLimitResetTime = 0;
+
 const checkGroqDailyLimit = () => {
   // Reset if 1 hour has passed since limit was hit
   if (groqDailyLimitHit && Date.now() > groqDailyLimitResetTime) {
@@ -166,6 +170,46 @@ const setGroqDailyLimitHit = () => {
   groqDailyLimitResetTime = Date.now() + 60 * 60 * 1000;
   console.log('Groq daily limit hit - switching to OpenRouter for 1 hour');
 };
+
+const checkOpenRouterDailyLimit = () => {
+  if (openrouterDailyLimitHit && Date.now() > openrouterDailyLimitResetTime) {
+    console.log('OpenRouter daily limit reset - trying OpenRouter again');
+    openrouterDailyLimitHit = false;
+  }
+  return openrouterDailyLimitHit;
+};
+
+const setOpenRouterDailyLimitHit = () => {
+  openrouterDailyLimitHit = true;
+  // Reset after 1 hour
+  openrouterDailyLimitResetTime = Date.now() + 60 * 60 * 1000;
+  console.log('OpenRouter daily limit hit');
+};
+
+// Check if ALL free AI providers are exhausted
+const areAllProvidersExhausted = () => {
+  const groqExhausted = !process.env.GROQ_API_KEY || checkGroqDailyLimit();
+  const openrouterExhausted = !process.env.OPENROUTER_API_KEY || checkOpenRouterDailyLimit();
+  return groqExhausted && openrouterExhausted;
+};
+
+// Get exhausted providers status for user notification
+export const getProvidersStatus = () => ({
+  groq: {
+    configured: !!process.env.GROQ_API_KEY,
+    exhausted: checkGroqDailyLimit(),
+    resetTime: groqDailyLimitHit ? new Date(groqDailyLimitResetTime).toISOString() : null
+  },
+  openrouter: {
+    configured: !!process.env.OPENROUTER_API_KEY,
+    exhausted: checkOpenRouterDailyLimit(),
+    resetTime: openrouterDailyLimitHit ? new Date(openrouterDailyLimitResetTime).toISOString() : null
+  },
+  allExhausted: areAllProvidersExhausted(),
+  message: areAllProvidersExhausted()
+    ? 'Лимиты бесплатных AI-моделей исчерпаны. Рекомендуется перейти на платный тариф Groq или OpenRouter.'
+    : null
+});
 
 const waitForRateLimit = async (providerName, taskType = 'general') => {
   const now = Date.now();
@@ -326,11 +370,17 @@ const parseRateLimitError = (errorMessage, providerName) => {
 const makeAIRequest = async (prompt, maxTokens = 1000, taskType = 'general', options = {}) => {
   const { forceFallback = false, retryCount = 0, modelIndex = 0 } = options;
 
+  // Check if all providers are exhausted BEFORE making request
+  if (areAllProvidersExhausted()) {
+    console.error('ALL_PROVIDERS_EXHAUSTED: Both Groq and OpenRouter daily limits reached');
+    throw new Error('ALL_PROVIDERS_EXHAUSTED|Лимиты бесплатных AI-моделей исчерпаны|Рекомендуется перейти на платный тариф Groq (https://console.groq.com) или OpenRouter (https://openrouter.ai)');
+  }
+
   // Get provider
   let activeConfig = getActiveProvider();
 
-  // Force OpenRouter fallback if requested
-  if (forceFallback && process.env.OPENROUTER_API_KEY) {
+  // Force OpenRouter fallback if requested (but check if it's exhausted)
+  if (forceFallback && process.env.OPENROUTER_API_KEY && !checkOpenRouterDailyLimit()) {
     activeConfig = { provider: PROVIDERS.openrouter, apiKey: process.env.OPENROUTER_API_KEY };
   }
 
@@ -398,10 +448,22 @@ const makeAIRequest = async (prompt, maxTokens = 1000, taskType = 'general', opt
         if (rateLimitInfo.type === 'daily' && provider.name === 'Groq') {
           setGroqDailyLimitHit();
           // Switch to OpenRouter immediately for this and all future requests
-          if (process.env.OPENROUTER_API_KEY) {
+          if (process.env.OPENROUTER_API_KEY && !checkOpenRouterDailyLimit()) {
             console.log('Groq daily limit - switching to OpenRouter...');
             return makeAIRequest(prompt, maxTokens, taskType, { forceFallback: true });
           }
+        }
+
+        // CRITICAL: If OpenRouter daily limit hit, remember it
+        if (rateLimitInfo.type === 'daily' && provider.name === 'OpenRouter') {
+          setOpenRouterDailyLimitHit();
+          // Try Groq if available and not exhausted
+          if (process.env.GROQ_API_KEY && !checkGroqDailyLimit()) {
+            console.log('OpenRouter daily limit - switching to Groq...');
+            return makeAIRequest(prompt, maxTokens, taskType, { forceFallback: false });
+          }
+          // Both exhausted - throw special error
+          throw new Error('ALL_PROVIDERS_EXHAUSTED|Лимиты бесплатных AI-моделей исчерпаны|Рекомендуется перейти на платный тариф Groq (https://console.groq.com) или OpenRouter (https://openrouter.ai)');
         }
 
         // Try next model in same provider (only for TPM limits, not daily)
@@ -1265,5 +1327,7 @@ export default {
   getConfidenceStats,
   getRequestLog,
   resetAnalytics,
-  getPromptVersion
+  getPromptVersion,
+  // Provider status (for exhausted limits notification)
+  getProvidersStatus
 };
