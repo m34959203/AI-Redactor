@@ -330,30 +330,49 @@ const setCache = (key, data) => {
 
 // ============ SECTION MATCHING ============
 
-// Keywords for flexible section matching
+// Keywords for flexible section matching (Russian, English, Kazakh)
 const SECTION_KEYWORDS = {
   'ТЕХНИЧЕСКИЕ НАУКИ': [
+    // Russian
     'ТЕХНИЧ', 'ТЕХНО', 'IT', 'ИНЖЕНЕР', 'ПРОГРАММИР', 'СТРОИТ',
     'ИНФОРМАЦ', 'КОМПЬЮТЕР', 'ЦИФРОВ', 'АВТОМАТИЗ', 'РОБОТ',
     'МАШИН', 'ЭЛЕКТР', 'ЭНЕРГ', 'ПРОМЫШЛЕН', 'ПРОИЗВОД',
     'СИСТЕМ', 'СЕТЬ', 'АЛГОРИТМ', 'ДАНН', 'SOFTWARE', 'HARDWARE',
-    'АРХИТЕКТ', 'CONSTRUCT', 'ENGINEER', 'TECHNICAL'
+    'АРХИТЕКТ', 'CONSTRUCT', 'ENGINEER', 'TECHNICAL',
+    'ИСКУССТВЕН', 'ИНТЕЛЛЕКТ', 'НЕЙРОН', 'НЕЙРОСЕТ', 'МАШИНН', 'ОБУЧЕН',
+    // Kazakh
+    'ТЕХНИК', 'АҚПАРАТ', 'КОМПЬЮТЕР', 'БАҒДАРЛАМ', 'ЖҮЙЕ', 'ЦИФРЛ',
+    'АВТОМАТТАНД', 'РОБОТ', 'ЭЛЕКТРОН', 'ЭНЕРГЕТИК', 'ӨНДІР',
+    'ҚҰРЫЛЫС', 'ИНЖЕНЕР', 'ЖЕЛІ', 'ДЕРЕКТЕР', 'ТЕХНОЛОГ',
+    'ЖАСАНДЫ ИНТЕЛЛЕКТ', 'ЖАСАНДЫ', 'ИНТЕЛЛЕКТ', 'НЕЙРОН', 'AI', 'ҚОЛДАНУ'
   ],
   'ПЕДАГОГИЧЕСКИЕ НАУКИ': [
+    // Russian
     'ПЕДАГОГ', 'ОБРАЗОВ', 'МЕТОДИК', 'ОБУЧЕН', 'ПРЕПОДАВ',
     'ДИДАКТ', 'ШКОЛ', 'УЧИТЕЛ', 'СТУДЕНТ', 'УЧАЩ', 'ВОСПИТАН',
     'УРОК', 'КУРС', 'ЛЕКЦ', 'СЕМИНАР', 'ПРАКТИК', 'ТРЕНИНГ',
     'КОМПЕТЕН', 'НАВЫК', 'ЗНАН', 'УМЕН', 'ОЦЕНК', 'ТЕСТ',
-    'EDUCATION', 'TEACH', 'LEARN', 'PEDAGOG', 'DIDACT'
+    'EDUCATION', 'TEACH', 'LEARN', 'PEDAGOG', 'DIDACT',
+    // Kazakh
+    'ПЕДАГОГ', 'БІЛІМ', 'ОҚЫТУ', 'ОҚУШЫ', 'МҰҒАЛІМ', 'МЕКТЕП',
+    'СТУДЕНТ', 'САБАҚ', 'ӘДІС', 'ТӘСІЛ', 'ДИДАКТ', 'ТӘРБИЕ',
+    'ОҚЫТ', 'ҮЙРЕТ', 'ДАҒДЫ', 'ҚҰЗЫРЕТ', 'БАҒАЛАУ', 'КУРС',
+    'САУАТТЫЛЫҚ', 'САУАТТЫЛ', 'ОРЫС ТІЛ', 'ҚАЗАҚ ТІЛ', 'ЕРЕКШЕЛІК'
   ],
   'ЕСТЕСТВЕННЫЕ И ЭКОНОМИЧЕСКИЕ НАУКИ': [
+    // Russian
     'ЕСТЕСТВ', 'ЭКОНОМ', 'ФИЗИК', 'ХИМИЯ', 'ХИМИЧ', 'БИОЛОГ',
     'МАТЕМАТ', 'ФИНАНС', 'БУХГАЛТЕР', 'АУДИТ', 'НАЛОГ',
     'ИНВЕСТ', 'БАНК', 'РЫНОК', 'БИЗНЕС', 'ПРЕДПРИНИМ',
     'ЭКОЛОГИ', 'ПРИРОД', 'ГЕОЛОГ', 'ГЕОГРАФ', 'АСТРОНОМ',
     'МЕДИЦ', 'ЗДОРОВ', 'ФАРМАЦ', 'ГЕНЕТИК', 'МИКРОБИО',
     'СТАТИСТ', 'АНАЛИЗ', 'МОДЕЛ', 'NATURAL', 'ECONOMIC', 'SCIENCE',
-    'BUSINESS', 'FINANCE', 'MARKET'
+    'BUSINESS', 'FINANCE', 'MARKET', 'ПЛАСТИК', 'ЛАСТАН', 'ЭКОЛОГИЯ',
+    // Kazakh
+    'ЭКОНОМИК', 'ҚАРЖЫ', 'БИЗНЕС', 'КӘСІПКЕР', 'БАНК', 'ИНВЕСТ',
+    'ФИЗИК', 'ХИМИЯ', 'БИОЛОГ', 'МАТЕМАТИК', 'ТАБИҒАТ', 'ЭКОЛОГИЯ',
+    'ГЕОЛОГ', 'ГЕОГРАФ', 'МЕДИЦИН', 'ДЕНСАУЛЫҚ', 'ДӘРІ', 'СТАТИСТ',
+    'ТАЛДАУ', 'МОДЕЛЬ', 'НАРЫҚ', 'САЛЫҚ', 'ҚОРШАҒАН ОРТА', 'ЛАСТАНУ'
   ]
 };
 
@@ -1228,20 +1247,20 @@ ${textToCheck}`;
 
 /**
  * Batch spell check for multiple articles
- * Processes 2 articles per request to reduce API calls
+ * Processes articles in parallel (up to 3 concurrent requests)
  */
 export const checkSpellingBatch = async (articles) => {
   if (!articles || articles.length === 0) return [];
 
   // Check cache for each article
-  const results = [];
+  const cachedResults = [];
   const uncachedArticles = [];
 
   for (const article of articles) {
     const cacheKey = generateCacheKey('spelling', article.content, article.fileName);
     const cached = getCached(cacheKey);
     if (cached) {
-      results.push({ fileName: article.fileName, ...cached, fromCache: true });
+      cachedResults.push({ fileName: article.fileName, ...cached, fromCache: true });
     } else {
       uncachedArticles.push(article);
     }
@@ -1250,105 +1269,43 @@ export const checkSpellingBatch = async (articles) => {
   // If all cached, return immediately
   if (uncachedArticles.length === 0) {
     console.log(`Batch spelling: all ${articles.length} articles from cache`);
-    return results;
+    return cachedResults;
   }
 
-  // Process uncached articles in batches of 2
-  const SPELLING_BATCH_SIZE = 2;
-  for (let i = 0; i < uncachedArticles.length; i += SPELLING_BATCH_SIZE) {
-    const batch = uncachedArticles.slice(i, i + SPELLING_BATCH_SIZE);
+  console.log(`Batch spelling: ${cachedResults.length} cached, ${uncachedArticles.length} to process`);
 
-    if (batch.length === 1) {
-      // Single article - use regular checkSpelling
-      const result = await checkSpelling(batch[0].content, batch[0].fileName);
-      results.push(result);
-      continue;
-    }
+  // Process uncached articles in PARALLEL (up to 3 concurrent)
+  const MAX_CONCURRENT = 3;
+  const processedResults = [];
 
-    // Build batch prompt for 2 articles
-    const articlesText = batch.map((a, idx) =>
-      `### ТЕКСТ ${idx + 1} (файл: "${a.fileName}"):\n${a.content.substring(0, 1500)}`
-    ).join('\n\n');
-
-    const prompt = `## ЗАДАЧА
-Проверь орфографию в ${batch.length} текстах. Верни массив результатов.
-
-## КРИТИЧНО - ИГНОРИРУЙ:
-- ВСЕ казахские слова
-- Термины, имена, аббревиатуры
-
-## ПРАВИЛА:
-1. word и suggestion ДОЛЖНЫ быть РАЗНЫМИ!
-2. Если не уверен — НЕ ДОБАВЛЯЙ
-
-## ФОРМАТ ОТВЕТА (JSON массив):
-[
-  {"fileName": "файл1.docx", "errors": [...], "totalErrors": N},
-  {"fileName": "файл2.docx", "errors": [...], "totalErrors": N}
-]
-
-${articlesText}`;
-
-    try {
-      const response = await makeAIRequest(prompt, 800, 'spelling', { forceFallback: true });
-
-      // Parse JSON array from response
-      let parsed;
-      const cleaned = extractJsonFromResponse(response);
-
-      if (cleaned.startsWith('[')) {
-        try {
-          parsed = JSON.parse(cleaned);
-        } catch {
-          const repaired = repairTruncatedJson(cleaned);
-          parsed = JSON.parse(repaired);
-        }
-      } else {
-        const obj = safeJsonParse(cleaned, {});
-        parsed = obj.results || obj.articles || [obj];
-      }
-
-      if (!Array.isArray(parsed)) {
-        // Fallback: process individually
-        for (const article of batch) {
-          const result = await checkSpelling(article.content, article.fileName);
-          results.push(result);
-        }
-        continue;
-      }
-
-      // Process each result
-      for (let j = 0; j < batch.length; j++) {
-        const article = batch[j];
-        const result = parsed[j] || { errors: [], totalErrors: 0 };
-
-        const validErrors = filterSpellingErrors(result.errors);
-        const spellingResult = { errors: validErrors, totalErrors: validErrors.length };
-
-        // Cache the result
-        const cacheKey = generateCacheKey('spelling', article.content, article.fileName);
-        setCache(cacheKey, spellingResult);
-
-        results.push({ fileName: article.fileName, ...spellingResult });
-      }
-
-      console.log(`Batch spell check: processed ${batch.length} articles`);
-
-    } catch (error) {
-      console.error('Batch spell check error:', error);
-      // Fallback: process individually
-      for (const article of batch) {
-        try {
-          const result = await checkSpelling(article.content, article.fileName);
-          results.push(result);
-        } catch {
-          results.push({ fileName: article.fileName, errors: [], totalErrors: 0 });
-        }
-      }
-    }
+  // Split into chunks for parallel processing
+  const chunks = [];
+  for (let i = 0; i < uncachedArticles.length; i += MAX_CONCURRENT) {
+    chunks.push(uncachedArticles.slice(i, i + MAX_CONCURRENT));
   }
 
-  return results;
+  for (const chunk of chunks) {
+    // Process chunk in parallel
+    const promises = chunk.map(article => processSpellingArticle(article));
+    const chunkResults = await Promise.all(promises);
+    processedResults.push(...chunkResults);
+  }
+
+  console.log(`Batch spelling completed: ${processedResults.length} articles processed`);
+  return [...cachedResults, ...processedResults];
+};
+
+/**
+ * Process single article for spelling (used for parallel processing)
+ */
+const processSpellingArticle = async (article) => {
+  try {
+    const result = await checkSpelling(article.content, article.fileName);
+    return result;
+  } catch (error) {
+    console.error(`Spelling error for ${article.fileName}:`, error.message);
+    return { fileName: article.fileName, errors: [], totalErrors: 0 };
+  }
 };
 
 /**

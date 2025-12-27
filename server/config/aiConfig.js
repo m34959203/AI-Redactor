@@ -28,22 +28,22 @@ export const BATCH_CONFIG = {
 // ============ RATE LIMITING ============
 export const RATE_LIMIT_CONFIG = {
   // Delay between requests (ms)
-  // Optimized delays based on actual rate limits
-  GROQ_DELAY: 3000,           // 3s (12K TPM with ~1500 tokens/req = 8 req/min max)
-  OPENROUTER_DELAY: 2000,     // 2s (20 req/min = 3s theoretical, 2s with burst capacity)
+  // Optimized for maximum throughput within limits
+  GROQ_DELAY: 2500,           // 2.5s (12K TPM with ~1500 tokens/req)
+  OPENROUTER_DELAY: 1500,     // 1.5s (20 req/min = 3s, but we use burst capacity)
 
-  // Delay after hitting rate limit (reduced for faster recovery)
-  DELAY_AFTER_429: 15000,     // 15s wait on 429 (was 25s)
+  // Delay after hitting rate limit
+  DELAY_AFTER_429: 10000,     // 10s wait on 429 (faster recovery)
 
-  // Delay between spelling checks (parallel-friendly)
-  SPELLING_DELAY: 1500,       // 1.5s between spell checks
+  // Delay between spelling checks (minimal for parallel processing)
+  SPELLING_DELAY: 800,        // 0.8s between spell checks (OpenRouter handles well)
 
   // Retry configuration
-  MAX_RETRIES: 3,             // Increased retries before failing
-  BACKOFF_MULTIPLIER: 3000,   // Reduced backoff base (3s instead of 6s)
+  MAX_RETRIES: 3,
+  BACKOFF_MULTIPLIER: 2000,   // 2s backoff base
 
-  // Minimum delay between ANY requests (prevents burst overload)
-  MIN_DELAY: 500
+  // Minimum delay between ANY requests
+  MIN_DELAY: 300              // 300ms minimum
 };
 
 // ============ CACHE ============
