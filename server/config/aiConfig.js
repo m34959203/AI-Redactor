@@ -6,41 +6,44 @@
 // ============ BATCH PROCESSING ============
 export const BATCH_CONFIG = {
   // Maximum articles per batch request
-  // Reduced to 2 to stay within 12000 TPM limit
-  BATCH_SIZE: 2,
+  // Increased to 4 for OpenRouter (200 req/day, higher throughput)
+  // Groq still limited by 12K TPM, but OpenRouter handles batches better
+  BATCH_SIZE: 4,
 
   // Maximum characters to send per article
-  // Reduced to 1000 (~250 tokens) for safer TPM margins
-  MAX_CHARS_PER_ARTICLE: 1000,
+  // 1200 chars (~300 tokens) balances context vs TPM
+  MAX_CHARS_PER_ARTICLE: 1200,
 
   // Maximum tokens for batch response
-  MAX_TOKENS_BATCH: 1000,
+  // Increased to handle 4 articles
+  MAX_TOKENS_BATCH: 1500,
 
   // Maximum tokens for single analysis
   MAX_TOKENS_SINGLE: 600,
 
-  // Maximum tokens for spelling check (reduced for TPM)
-  // Spelling now uses OpenRouter, so we can use fewer tokens
-  MAX_TOKENS_SPELLING: 600
+  // Maximum tokens for spelling check
+  MAX_TOKENS_SPELLING: 500
 };
 
 // ============ RATE LIMITING ============
 export const RATE_LIMIT_CONFIG = {
   // Delay between requests (ms)
-  // CRITICAL: 12000 TPM needs ~6s between requests for recovery
-  GROQ_DELAY: 6000,           // 6s for TPM recovery (12000 TPM / ~2000 tokens per req)
-  OPENROUTER_DELAY: 5000,     // 20 req/min = 3s, but we use 5s for safety
+  // Optimized delays based on actual rate limits
+  GROQ_DELAY: 3000,           // 3s (12K TPM with ~1500 tokens/req = 8 req/min max)
+  OPENROUTER_DELAY: 2000,     // 2s (20 req/min = 3s theoretical, 2s with burst capacity)
 
-  // Delay after hitting rate limit (TPM resets per minute)
-  DELAY_AFTER_429: 25000,     // 25s wait on 429
+  // Delay after hitting rate limit (reduced for faster recovery)
+  DELAY_AFTER_429: 15000,     // 15s wait on 429 (was 25s)
 
-  // Delay between spelling checks
-  // Now uses OpenRouter (200 req/day), so 3s is enough
-  SPELLING_DELAY: 3000,       // 3s between spell checks (OpenRouter)
+  // Delay between spelling checks (parallel-friendly)
+  SPELLING_DELAY: 1500,       // 1.5s between spell checks
 
   // Retry configuration
-  MAX_RETRIES: 2,             // Reduced - fail fast, switch provider
-  BACKOFF_MULTIPLIER: 6000    // exponential backoff base
+  MAX_RETRIES: 3,             // Increased retries before failing
+  BACKOFF_MULTIPLIER: 3000,   // Reduced backoff base (3s instead of 6s)
+
+  // Minimum delay between ANY requests (prevents burst overload)
+  MIN_DELAY: 500
 };
 
 // ============ CACHE ============

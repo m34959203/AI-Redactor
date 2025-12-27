@@ -140,6 +140,31 @@ router.post('/spelling', async (req, res) => {
 });
 
 /**
+ * POST /api/ai/spelling-batch
+ * Batch spelling check for multiple articles (2x faster)
+ * Body: { articles: [{fileName, content}, ...] }
+ */
+router.post('/spelling-batch', async (req, res) => {
+  try {
+    const { articles } = req.body;
+
+    if (!articles || !Array.isArray(articles) || articles.length === 0) {
+      return res.status(400).json({ error: 'Articles array is required' });
+    }
+
+    // Limit batch size on server side
+    if (articles.length > 10) {
+      return res.status(400).json({ error: 'Maximum 10 articles per batch', maxBatchSize: 10 });
+    }
+
+    const results = await aiService.checkSpellingBatch(articles);
+    res.json({ results, count: results.length });
+  } catch (error) {
+    handleAIError(error, res);
+  }
+});
+
+/**
  * POST /api/ai/review
  * Generate article review with scores
  */

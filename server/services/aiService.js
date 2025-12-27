@@ -140,6 +140,69 @@ const getActiveProvider = () => {
   return null;
 };
 
+// ============ REQUEST QUEUE ============
+
+/**
+ * Simple request queue to prevent burst overload
+ * Processes requests sequentially with configurable delays
+ */
+class RequestQueue {
+  constructor() {
+    this.queue = [];
+    this.processing = false;
+    this.lastProcessTime = 0;
+  }
+
+  async add(fn, priority = 0) {
+    return new Promise((resolve, reject) => {
+      this.queue.push({ fn, resolve, reject, priority });
+      // Sort by priority (higher = first)
+      this.queue.sort((a, b) => b.priority - a.priority);
+      this.process();
+    });
+  }
+
+  async process() {
+    if (this.processing || this.queue.length === 0) return;
+
+    this.processing = true;
+
+    while (this.queue.length > 0) {
+      const { fn, resolve, reject } = this.queue.shift();
+
+      // Ensure minimum delay between requests
+      const minDelay = RATE_LIMIT_CONFIG.MIN_DELAY || 500;
+      const timeSinceLastRequest = Date.now() - this.lastProcessTime;
+      if (timeSinceLastRequest < minDelay) {
+        await new Promise(r => setTimeout(r, minDelay - timeSinceLastRequest));
+      }
+
+      try {
+        const result = await fn();
+        this.lastProcessTime = Date.now();
+        resolve(result);
+      } catch (error) {
+        this.lastProcessTime = Date.now();
+        reject(error);
+      }
+    }
+
+    this.processing = false;
+  }
+
+  get length() {
+    return this.queue.length;
+  }
+
+  clear() {
+    const cleared = this.queue.length;
+    this.queue = [];
+    return cleared;
+  }
+}
+
+const requestQueue = new RequestQueue();
+
 // ============ RATE LIMITING ============
 
 let lastRequestTime = 0;
@@ -263,6 +326,66 @@ const setCache = (key, data) => {
       if (now - v.timestamp > CACHE_CONFIG.TTL) cache.delete(k);
     }
   }
+};
+
+// ============ SECTION MATCHING ============
+
+// Keywords for flexible section matching
+const SECTION_KEYWORDS = {
+  'ТЕХНИЧЕСКИЕ НАУКИ': [
+    'ТЕХНИЧ', 'ТЕХНО', 'IT', 'ИНЖЕНЕР', 'ПРОГРАММИР', 'СТРОИТ',
+    'ИНФОРМАЦ', 'КОМПЬЮТЕР', 'ЦИФРОВ', 'АВТОМАТИЗ', 'РОБОТ',
+    'МАШИН', 'ЭЛЕКТР', 'ЭНЕРГ', 'ПРОМЫШЛЕН', 'ПРОИЗВОД',
+    'СИСТЕМ', 'СЕТЬ', 'АЛГОРИТМ', 'ДАНН', 'SOFTWARE', 'HARDWARE',
+    'АРХИТЕКТ', 'CONSTRUCT', 'ENGINEER', 'TECHNICAL'
+  ],
+  'ПЕДАГОГИЧЕСКИЕ НАУКИ': [
+    'ПЕДАГОГ', 'ОБРАЗОВ', 'МЕТОДИК', 'ОБУЧЕН', 'ПРЕПОДАВ',
+    'ДИДАКТ', 'ШКОЛ', 'УЧИТЕЛ', 'СТУДЕНТ', 'УЧАЩ', 'ВОСПИТАН',
+    'УРОК', 'КУРС', 'ЛЕКЦ', 'СЕМИНАР', 'ПРАКТИК', 'ТРЕНИНГ',
+    'КОМПЕТЕН', 'НАВЫК', 'ЗНАН', 'УМЕН', 'ОЦЕНК', 'ТЕСТ',
+    'EDUCATION', 'TEACH', 'LEARN', 'PEDAGOG', 'DIDACT'
+  ],
+  'ЕСТЕСТВЕННЫЕ И ЭКОНОМИЧЕСКИЕ НАУКИ': [
+    'ЕСТЕСТВ', 'ЭКОНОМ', 'ФИЗИК', 'ХИМИЯ', 'ХИМИЧ', 'БИОЛОГ',
+    'МАТЕМАТ', 'ФИНАНС', 'БУХГАЛТЕР', 'АУДИТ', 'НАЛОГ',
+    'ИНВЕСТ', 'БАНК', 'РЫНОК', 'БИЗНЕС', 'ПРЕДПРИНИМ',
+    'ЭКОЛОГИ', 'ПРИРОД', 'ГЕОЛОГ', 'ГЕОГРАФ', 'АСТРОНОМ',
+    'МЕДИЦ', 'ЗДОРОВ', 'ФАРМАЦ', 'ГЕНЕТИК', 'МИКРОБИО',
+    'СТАТИСТ', 'АНАЛИЗ', 'МОДЕЛ', 'NATURAL', 'ECONOMIC', 'SCIENCE',
+    'BUSINESS', 'FINANCE', 'MARKET'
+  ]
+};
+
+/**
+ * Match detected section string to known sections using keywords
+ * @param {string} detectedSection - Uppercase section string from AI
+ * @returns {string|null} - Matched section name or null
+ */
+const matchSectionByKeywords = (detectedSection) => {
+  if (!detectedSection || detectedSection.length === 0) return null;
+
+  // First try exact match
+  const exactMatch = ARTICLE_SECTIONS.find(s => s.toUpperCase() === detectedSection);
+  if (exactMatch) return exactMatch;
+
+  // Try partial match (section name contains detected or vice versa)
+  const partialMatch = ARTICLE_SECTIONS.find(s => {
+    const sectionUpper = s.toUpperCase();
+    return detectedSection.includes(sectionUpper) || sectionUpper.includes(detectedSection);
+  });
+  if (partialMatch) return partialMatch;
+
+  // Try keyword matching
+  for (const [section, keywords] of Object.entries(SECTION_KEYWORDS)) {
+    for (const keyword of keywords) {
+      if (detectedSection.includes(keyword)) {
+        return section;
+      }
+    }
+  }
+
+  return null;
 };
 
 // ============ JSON PARSING ============
@@ -621,16 +744,9 @@ ${content.substring(0, 4000)}
     }
     author = author.trim().replace(/,\s*$/, '').replace(/\s+/g, ' ');
 
-    // Process section - skip matching if section is empty/undefined
+    // Process section - use centralized keyword matching
     const detectedSection = result.section?.toUpperCase?.()?.trim() || '';
-    const matchedSection = detectedSection.length > 0 ? ARTICLE_SECTIONS.find(s =>
-      s.toUpperCase() === detectedSection ||
-      s.toUpperCase().includes(detectedSection.replace(/\s+/g, ' ').trim()) ||
-      detectedSection.includes(s.toUpperCase()) ||
-      (detectedSection.includes('ТЕХНИЧ') && s.includes('ТЕХНИЧЕСКИЕ')) ||
-      (detectedSection.includes('ПЕДАГОГ') && s.includes('ПЕДАГОГИЧЕСКИЕ')) ||
-      (detectedSection.includes('ЕСТЕСТВ') && s.includes('ЕСТЕСТВЕННЫЕ'))
-    ) : null;
+    const matchedSection = matchSectionByKeywords(detectedSection);
 
     const confidence = Math.max(0, Math.min(1, Number(result.sectionConfidence) || 0.5));
 
@@ -781,18 +897,7 @@ ${articlesText}
       console.log(`Section matching for "${article.fileName}": model returned "${result.section}" -> normalized: "${detectedSection}"`);
 
       // If model returned empty/undefined section, skip matching and return null
-      const matchedSection = detectedSection.length > 0 ? ARTICLE_SECTIONS.find(s => {
-        const sectionUpper = s.toUpperCase();
-        // Exact match
-        if (sectionUpper === detectedSection) return true;
-        // Partial match (section name contains detected or vice versa)
-        if (detectedSection.includes(sectionUpper) || sectionUpper.includes(detectedSection)) return true;
-        // Keyword matching for flexible model outputs
-        if ((detectedSection.includes('ТЕХНИЧ') || detectedSection.includes('ТЕХНО') || detectedSection.includes('IT') || detectedSection.includes('ИНЖЕНЕР')) && s.includes('ТЕХНИЧЕСКИЕ')) return true;
-        if ((detectedSection.includes('ПЕДАГОГ') || detectedSection.includes('ОБРАЗОВ') || detectedSection.includes('МЕТОДИК') || detectedSection.includes('ОБУЧЕН')) && s.includes('ПЕДАГОГИЧЕСКИЕ')) return true;
-        if ((detectedSection.includes('ЕСТЕСТВ') || detectedSection.includes('ЭКОНОМ') || detectedSection.includes('ФИЗИК') || detectedSection.includes('ХИМИЯ') || detectedSection.includes('БИОЛОГ') || detectedSection.includes('МАТЕМАТ') || detectedSection.includes('ФИНАНС')) && s.includes('ЕСТЕСТВЕННЫЕ')) return true;
-        return false;
-      }) : null;
+      const matchedSection = detectedSection.length > 0 ? matchSectionByKeywords(detectedSection) : null;
 
       // DEBUG: Log match result
       console.log(`Section match result for "${article.fileName}": ${matchedSection ? `MATCHED -> "${matchedSection}"` : 'NO MATCH -> ТРЕБУЕТ КЛАССИФИКАЦИИ'}`);
@@ -938,12 +1043,7 @@ ${content.substring(0, 2500)}
     if (!result?.section) return fallbackResult;
 
     const detectedSection = result.section?.toUpperCase?.()?.trim() || '';
-    // Skip matching if section is empty/undefined
-    const matchedSection = detectedSection.length > 0 ? ARTICLE_SECTIONS.find(s =>
-      s.toUpperCase() === detectedSection ||
-      s.toUpperCase().includes(detectedSection) ||
-      detectedSection.includes(s.toUpperCase())
-    ) : null;
+    const matchedSection = matchSectionByKeywords(detectedSection);
 
     const confidence = Math.max(0, Math.min(1, Number(result.confidence) || 0.5));
 
@@ -962,11 +1062,49 @@ ${content.substring(0, 2500)}
   }
 };
 
+// Kazakh-specific characters pattern
+const KAZAKH_PATTERN = /[ӘәҒғҚқҢңӨөҰұҮүҺһІі]/;
+
+// Common Kazakh words without special characters
+const KAZAKH_WORDS = /^(сауаттылық|білім|оқыту|мектеп|тіл|және|бойынша|туралы|арқылы|жүйесі|дамуы|қазақ|орыс|математикалық|жағдайда|сабақ|оқушы|мұғалім|әдіс|тәсіл|ұйым|жұмыс|бағдарлама|ғылым|тарих|мәдениет|қоғам|мемлекет|заң|құқық|денсаулық|спорт|өнер|музыка)$/i;
+
 /**
- * Check spelling
+ * Filter out false positive spelling errors
+ */
+const filterSpellingErrors = (errors) => {
+  if (!Array.isArray(errors)) return [];
+
+  return errors.filter(err => {
+    if (!err.word || !err.suggestion) return false;
+
+    const word = err.word.trim();
+    const suggestion = err.suggestion.trim();
+
+    // Filter out identical words (case-insensitive, normalized)
+    const normalizedWord = word.toLowerCase().normalize('NFC');
+    const normalizedSuggestion = suggestion.toLowerCase().normalize('NFC');
+    if (normalizedWord === normalizedSuggestion) return false;
+
+    // Filter out Kazakh words (containing Kazakh-specific characters)
+    if (KAZAKH_PATTERN.test(word) || KAZAKH_PATTERN.test(suggestion)) return false;
+
+    // Filter out common Kazakh words even without special characters
+    if (KAZAKH_WORDS.test(word)) return false;
+
+    return true;
+  });
+};
+
+/**
+ * Check spelling for a single article
  * Uses OpenRouter when available (200 req/day) to avoid Groq's 6K TPM limit
  */
 export const checkSpelling = async (content, fileName) => {
+  // Check cache first
+  const cacheKey = generateCacheKey('spelling', content, fileName);
+  const cached = getCached(cacheKey);
+  if (cached) return { fileName, ...cached };
+
   // Reduced from 4000 to 2000 chars to minimize token usage
   const textToCheck = content.substring(0, 2000);
 
@@ -1000,12 +1138,9 @@ ${textToCheck}`;
 
   const fallback = { errors: [], totalErrors: 0 };
 
-  // Kazakh-specific characters pattern
-  const KAZAKH_PATTERN = /[ӘәҒғҚқҢңӨөҰұҮүҺһІі]/;
-
   try {
     // Use configured token limit for spelling to conserve TPM
-    const maxTokens = BATCH_CONFIG.MAX_TOKENS_SPELLING || 600;
+    const maxTokens = BATCH_CONFIG.MAX_TOKENS_SPELLING || 500;
 
     // CRITICAL: Use OpenRouter for spelling when available
     // Groq has only 6K TPM for 8B model, causing constant 429 errors
@@ -1014,34 +1149,142 @@ ${textToCheck}`;
     const response = await makeAIRequest(prompt, maxTokens, 'spelling', { forceFallback: useOpenRouter });
     const result = safeJsonParse(response, fallback);
 
-    const validErrors = Array.isArray(result.errors)
-      ? result.errors.filter(err => {
-          if (!err.word || !err.suggestion) return false;
+    const validErrors = filterSpellingErrors(result.errors);
+    const spellingResult = { errors: validErrors, totalErrors: validErrors.length };
 
-          const word = err.word.trim();
-          const suggestion = err.suggestion.trim();
+    // Cache the result
+    setCache(cacheKey, spellingResult);
 
-          // Filter out identical words (case-insensitive, normalized)
-          const normalizedWord = word.toLowerCase().normalize('NFC');
-          const normalizedSuggestion = suggestion.toLowerCase().normalize('NFC');
-          if (normalizedWord === normalizedSuggestion) return false;
-
-          // Filter out Kazakh words (containing Kazakh-specific characters)
-          if (KAZAKH_PATTERN.test(word) || KAZAKH_PATTERN.test(suggestion)) return false;
-
-          // Filter out common Kazakh words even without special characters
-          const kazakhWords = /^(сауаттылық|білім|оқыту|мектеп|тіл|және|бойынша|туралы|арқылы|жүйесі|дамуы|қазақ|орыс|математикалық|жағдайда|сабақ|оқушы|мұғалім|әдіс|тәсіл|ұйым|жұмыс|бағдарлама)$/i;
-          if (kazakhWords.test(word)) return false;
-
-          return true;
-        })
-      : [];
-
-    return { fileName, errors: validErrors, totalErrors: validErrors.length };
+    return { fileName, ...spellingResult };
   } catch (error) {
     console.error('Spell check error:', error);
     return { fileName, ...fallback };
   }
+};
+
+/**
+ * Batch spell check for multiple articles
+ * Processes 2 articles per request to reduce API calls
+ */
+export const checkSpellingBatch = async (articles) => {
+  if (!articles || articles.length === 0) return [];
+
+  // Check cache for each article
+  const results = [];
+  const uncachedArticles = [];
+
+  for (const article of articles) {
+    const cacheKey = generateCacheKey('spelling', article.content, article.fileName);
+    const cached = getCached(cacheKey);
+    if (cached) {
+      results.push({ fileName: article.fileName, ...cached, fromCache: true });
+    } else {
+      uncachedArticles.push(article);
+    }
+  }
+
+  // If all cached, return immediately
+  if (uncachedArticles.length === 0) {
+    console.log(`Batch spelling: all ${articles.length} articles from cache`);
+    return results;
+  }
+
+  // Process uncached articles in batches of 2
+  const SPELLING_BATCH_SIZE = 2;
+  for (let i = 0; i < uncachedArticles.length; i += SPELLING_BATCH_SIZE) {
+    const batch = uncachedArticles.slice(i, i + SPELLING_BATCH_SIZE);
+
+    if (batch.length === 1) {
+      // Single article - use regular checkSpelling
+      const result = await checkSpelling(batch[0].content, batch[0].fileName);
+      results.push(result);
+      continue;
+    }
+
+    // Build batch prompt for 2 articles
+    const articlesText = batch.map((a, idx) =>
+      `### ТЕКСТ ${idx + 1} (файл: "${a.fileName}"):\n${a.content.substring(0, 1500)}`
+    ).join('\n\n');
+
+    const prompt = `## ЗАДАЧА
+Проверь орфографию в ${batch.length} текстах. Верни массив результатов.
+
+## КРИТИЧНО - ИГНОРИРУЙ:
+- ВСЕ казахские слова
+- Термины, имена, аббревиатуры
+
+## ПРАВИЛА:
+1. word и suggestion ДОЛЖНЫ быть РАЗНЫМИ!
+2. Если не уверен — НЕ ДОБАВЛЯЙ
+
+## ФОРМАТ ОТВЕТА (JSON массив):
+[
+  {"fileName": "файл1.docx", "errors": [...], "totalErrors": N},
+  {"fileName": "файл2.docx", "errors": [...], "totalErrors": N}
+]
+
+${articlesText}`;
+
+    try {
+      const response = await makeAIRequest(prompt, 800, 'spelling', { forceFallback: true });
+
+      // Parse JSON array from response
+      let parsed;
+      const cleaned = extractJsonFromResponse(response);
+
+      if (cleaned.startsWith('[')) {
+        try {
+          parsed = JSON.parse(cleaned);
+        } catch {
+          const repaired = repairTruncatedJson(cleaned);
+          parsed = JSON.parse(repaired);
+        }
+      } else {
+        const obj = safeJsonParse(cleaned, {});
+        parsed = obj.results || obj.articles || [obj];
+      }
+
+      if (!Array.isArray(parsed)) {
+        // Fallback: process individually
+        for (const article of batch) {
+          const result = await checkSpelling(article.content, article.fileName);
+          results.push(result);
+        }
+        continue;
+      }
+
+      // Process each result
+      for (let j = 0; j < batch.length; j++) {
+        const article = batch[j];
+        const result = parsed[j] || { errors: [], totalErrors: 0 };
+
+        const validErrors = filterSpellingErrors(result.errors);
+        const spellingResult = { errors: validErrors, totalErrors: validErrors.length };
+
+        // Cache the result
+        const cacheKey = generateCacheKey('spelling', article.content, article.fileName);
+        setCache(cacheKey, spellingResult);
+
+        results.push({ fileName: article.fileName, ...spellingResult });
+      }
+
+      console.log(`Batch spell check: processed ${batch.length} articles`);
+
+    } catch (error) {
+      console.error('Batch spell check error:', error);
+      // Fallback: process individually
+      for (const article of batch) {
+        try {
+          const result = await checkSpelling(article.content, article.fileName);
+          results.push(result);
+        } catch {
+          results.push({ fileName: article.fileName, errors: [], totalErrors: 0 });
+        }
+      }
+    }
+  }
+
+  return results;
 };
 
 /**
@@ -1140,15 +1383,7 @@ ${content.substring(0, 3500)}
       if (!result?.section) continue;
 
       const detectedSection = result.section?.toUpperCase?.()?.trim() || '';
-      // Skip matching if section is empty/undefined
-      const matchedSection = detectedSection.length > 0 ? ARTICLE_SECTIONS.find(s => {
-        const norm = s.toUpperCase().replace(/\s+/g, ' ').trim();
-        const det = detectedSection.replace(/\s+/g, ' ').trim();
-        return norm === det || norm.includes(det) || det.includes(norm) ||
-          (det.includes('ТЕХНИЧ') && s.includes('ТЕХНИЧЕСКИЕ')) ||
-          (det.includes('ПЕДАГОГ') && s.includes('ПЕДАГОГИЧЕСКИЕ')) ||
-          (det.includes('ЕСТЕСТВ') && s.includes('ЕСТЕСТВЕННЫЕ'));
-      }) : null;
+      const matchedSection = matchSectionByKeywords(detectedSection);
 
       if (matchedSection) {
         return {
@@ -1336,6 +1571,7 @@ export default {
   extractMetadata,
   detectSection,
   checkSpelling,
+  checkSpellingBatch,
   reviewArticle,
   retryClassification,
   getStatus,
