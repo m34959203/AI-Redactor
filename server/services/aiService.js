@@ -388,6 +388,46 @@ const matchSectionByKeywords = (detectedSection) => {
   return null;
 };
 
+/**
+ * Detect section from article content using keywords
+ * Fallback when AI fails to return section
+ * @param {string} content - Article content
+ * @param {string} title - Article title
+ * @returns {{section: string, confidence: number}}
+ */
+const detectSectionFromContent = (content, title = '') => {
+  const text = `${title} ${content}`.toUpperCase();
+
+  // Count keyword matches for each section
+  const scores = {};
+  for (const [section, keywords] of Object.entries(SECTION_KEYWORDS)) {
+    scores[section] = 0;
+    for (const keyword of keywords) {
+      // Count occurrences (up to 3 per keyword)
+      const matches = (text.match(new RegExp(keyword, 'g')) || []).length;
+      scores[section] += Math.min(matches, 3);
+    }
+  }
+
+  // Find best match
+  let bestSection = null;
+  let bestScore = 0;
+  for (const [section, score] of Object.entries(scores)) {
+    if (score > bestScore) {
+      bestScore = score;
+      bestSection = section;
+    }
+  }
+
+  // Return result if confidence is high enough (at least 2 keyword matches)
+  if (bestScore >= 2) {
+    const confidence = Math.min(0.8, 0.4 + bestScore * 0.1);
+    return { section: bestSection, confidence };
+  }
+
+  return { section: null, confidence: 0 };
+};
+
 // ============ JSON PARSING ============
 
 const extractJsonFromResponse = (response) => {
@@ -824,28 +864,27 @@ export const analyzeArticlesBatch = async (articles) => {
   ).join('\n\n');
 
   const prompt = `## ЗАДАЧА
-Проанализируй ${uncachedArticles.length} научных статей и верни массив результатов.
+Проанализируй ${uncachedArticles.length} научных статей и верни JSON массив с ${uncachedArticles.length} элементами.
 
-## ПРАВИЛА:
+## КРИТИЧНЫЕ ПРАВИЛА:
+1. КАЖДЫЙ элемент массива ОБЯЗАН содержать поле "section" с ТОЧНЫМ названием раздела!
+2. Если не можешь определить раздел — выбери наиболее подходящий на основе содержания
+
+## РАЗДЕЛЫ (выбери ОДИН для КАЖДОЙ статьи):
+- "ТЕХНИЧЕСКИЕ НАУКИ" — IT, инженерия, программирование, строительство, технологии, компьютеры
+- "ПЕДАГОГИЧЕСКИЕ НАУКИ" — образование, методика преподавания, педагогика, обучение, школа, студенты
+- "ЕСТЕСТВЕННЫЕ И ЭКОНОМИЧЕСКИЕ НАУКИ" — физика, химия, биология, экономика, финансы, математика, экология
+
+## ИЗВЛЕЧЕНИЕ ДАННЫХ:
 - НАЗВАНИЕ: после УДК/UDC, до авторов (на языке оригинала!)
-- АВТОР (ВНИМАТЕЛЬНО!):
-  * Ищи ПОСЛЕ названия, ПЕРЕД аннотацией
-  * Форматы: "Фамилия И.О.", "И.О. Фамилия", полное ФИО
-  * Казахские имена: "Қалжанова Г.М.", "Нығызбаева П.Т." (сохраняй казахские буквы!)
-  * Если имя в названии файла — используй его!
-  * ВСЕГДА указывай автора, не пиши "Автор не указан" без причины
-- РАЗДЕЛ — ОБЯЗАТЕЛЬНО выбери ОДИН из ТРЁХ (используй ТОЧНОЕ название):
-  * "ТЕХНИЧЕСКИЕ НАУКИ" — IT, инженерия, программирование, строительство, технологии
-  * "ПЕДАГОГИЧЕСКИЕ НАУКИ" — образование, методика преподавания, дидактика, педагогика
-  * "ЕСТЕСТВЕННЫЕ И ЭКОНОМИЧЕСКИЕ НАУКИ" — физика, химия, биология, экономика, финансы, математика
-- sectionConfidence: 0.7-1.0 (если тема явно соответствует разделу)
-
-КРИТИЧНО: Поле "section" должно содержать ТОЧНОЕ название раздела из списка выше!
+- АВТОР: ищи после названия, форматы: "Фамилия И.О." или "И.О. Фамилия"
+- Казахские имена сохраняй как есть: "Қалжанова Г.М.", "Нығызбаева П.Т."
 ${BATCH_EXAMPLE}
 ## СТАТЬИ ДЛЯ АНАЛИЗА:
 ${articlesText}
 
-## ТВОЙ ОТВЕТ (JSON массив, СТРОГО ${uncachedArticles.length} элементов):`;
+## ОТВЕТ (JSON массив из ${uncachedArticles.length} объектов, КАЖДЫЙ с полем section):
+[`;
 
   const fallbackResults = uncachedArticles.map(a => ({
     fileName: a.fileName,
@@ -861,8 +900,16 @@ ${articlesText}
     const response = await makeAIRequest(prompt, 2000, 'batch');
 
     // Parse JSON array from response
+    // Note: prompt ends with "[" so model should continue the array
     let parsed;
-    const cleaned = extractJsonFromResponse(response);
+    let cleaned = response?.trim() || '';
+
+    // If response doesn't start with [ or {, prepend [ (model continued from our prompt)
+    if (!cleaned.startsWith('[') && !cleaned.startsWith('{')) {
+      cleaned = '[' + cleaned;
+    }
+
+    cleaned = extractJsonFromResponse(cleaned);
 
     // Handle array response
     if (cleaned.startsWith('[')) {
@@ -871,7 +918,12 @@ ${articlesText}
       } catch {
         // Try to repair truncated array
         const repaired = repairTruncatedJson(cleaned);
-        parsed = JSON.parse(repaired);
+        try {
+          parsed = JSON.parse(repaired);
+        } catch {
+          console.error('Failed to parse batch response JSON');
+          parsed = [];
+        }
       }
     } else {
       // If wrapped in object, extract articles array
@@ -896,14 +948,26 @@ ${articlesText}
       // DEBUG: Log what the model returned for troubleshooting
       console.log(`Section matching for "${article.fileName}": model returned "${result.section}" -> normalized: "${detectedSection}"`);
 
-      // If model returned empty/undefined section, skip matching and return null
-      const matchedSection = detectedSection.length > 0 ? matchSectionByKeywords(detectedSection) : null;
+      // Try AI-returned section first
+      let matchedSection = detectedSection.length > 0 ? matchSectionByKeywords(detectedSection) : null;
+      let confidence = Number(result.sectionConfidence) || 0;
+
+      // FALLBACK: If AI didn't return section, try content-based detection
+      if (!matchedSection) {
+        console.log(`Fallback: trying content-based section detection for "${article.fileName}"`);
+        const contentDetection = detectSectionFromContent(article.content, result.title || '');
+        if (contentDetection.section) {
+          matchedSection = contentDetection.section;
+          confidence = contentDetection.confidence;
+          console.log(`Content-based detection: "${article.fileName}" -> "${matchedSection}" (confidence: ${confidence})`);
+        }
+      } else {
+        // AI returned valid section
+        confidence = Math.max(0, Math.min(1, confidence || 0.7));
+      }
 
       // DEBUG: Log match result
       console.log(`Section match result for "${article.fileName}": ${matchedSection ? `MATCHED -> "${matchedSection}"` : 'NO MATCH -> ТРЕБУЕТ КЛАССИФИКАЦИИ'}`);
-
-      // Default confidence to 0.7 if section was matched (model outputs are usually reliable)
-      const confidence = Math.max(0, Math.min(1, Number(result.sectionConfidence) || (matchedSection ? 0.7 : 0.3)));
 
       let author = result.author;
       if (!author || author === 'null' || author === 'Не указан' || !author.trim()) {
