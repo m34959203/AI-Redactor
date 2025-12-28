@@ -49,7 +49,12 @@ const handleApiError = (error, response) => {
     const data = error;
     throw new Error(`RATE_LIMIT|${data.error || 'Rate limit exceeded'}|${data.suggestion || 'Try again later'}`);
   }
-  throw new Error(error.error || error.message || 'AI request failed');
+  // Check for all providers exhausted
+  const errorMessage = error.error || error.message || '';
+  if (errorMessage.includes('ALL_PROVIDERS_EXHAUSTED')) {
+    throw new Error('ALL_PROVIDERS_EXHAUSTED|Лимиты бесплатных AI-моделей исчерпаны');
+  }
+  throw new Error(errorMessage || 'AI request failed');
 };
 
 /**
@@ -135,9 +140,10 @@ export const analyzeArticlesBatch = async (articles) => {
       }));
       allResults.push(...fallbackResults);
 
-      // If rate limited, stop processing
-      if (error.message?.includes('RATE_LIMIT') || error.message?.includes('429')) {
-        break;
+      // If rate limited or all providers exhausted, stop processing
+      if (error.message?.includes('RATE_LIMIT') || error.message?.includes('429') ||
+          error.message?.includes('ALL_PROVIDERS_EXHAUSTED')) {
+        throw error; // Re-throw to propagate to App.jsx for big banner
       }
     }
   }

@@ -5,6 +5,7 @@ import LoadingOverlay from './components/UI/LoadingOverlay';
 import ToastContainer from './components/UI/Toast';
 import Onboarding from './components/UI/Onboarding';
 import ConfirmDialog from './components/UI/ConfirmDialog';
+import LimitExhaustedBanner from './components/UI/LimitExhaustedBanner';
 import EditorTab from './components/Editor/EditorTab';
 import SpellCheckTab from './components/SpellCheck/SpellCheckTab';
 import ReviewTab from './components/Review/ReviewTab';
@@ -59,6 +60,20 @@ const App = () => {
     variant: 'danger',
     onConfirm: () => {},
   });
+
+  // Limit exhausted banner state
+  const [limitExhausted, setLimitExhausted] = useState({
+    isVisible: false,
+    message: ''
+  });
+
+  const showLimitExhausted = (message) => {
+    setLimitExhausted({ isVisible: true, message });
+  };
+
+  const hideLimitExhausted = () => {
+    setLimitExhausted({ isVisible: false, message: '' });
+  };
 
   const showConfirm = ({ title, message, confirmText = 'Удалить', variant = 'danger', onConfirm }) => {
     setConfirmDialog({ isOpen: true, title, message, confirmText, variant, onConfirm });
@@ -206,8 +221,13 @@ const App = () => {
         } catch (error) {
           console.error('Batch analysis error:', error);
 
+          // Check for all providers exhausted - show big banner
+          if (error.message?.includes('ALL_PROVIDERS_EXHAUSTED')) {
+            aiAvailable = false;
+            showLimitExhausted('Дневной лимит всех бесплатных AI-моделей (Gemini, Groq, OpenRouter) исчерпан. Подождите или обновите тариф.');
+          }
           // Check for rate limit
-          if (error.message?.includes('RATE_LIMIT') || error.message?.includes('429')) {
+          else if (error.message?.includes('RATE_LIMIT') || error.message?.includes('429')) {
             aiAvailable = false;
             showError('Сервер занят. Используем быстрый режим обработки.');
           }
@@ -698,6 +718,13 @@ const App = () => {
         message={confirmDialog.message}
         confirmText={confirmDialog.confirmText}
         variant={confirmDialog.variant}
+      />
+
+      {/* Limit Exhausted Banner */}
+      <LimitExhaustedBanner
+        isVisible={limitExhausted.isVisible}
+        onDismiss={hideLimitExhausted}
+        message={limitExhausted.message}
       />
     </div>
   );
