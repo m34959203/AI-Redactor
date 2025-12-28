@@ -5,25 +5,25 @@
 
 // ============ BATCH PROCESSING ============
 export const BATCH_CONFIG = {
-  // Maximum articles per batch request
-  // Gemini: 250K TPM allows large batches (6 articles × 1500 chars ≈ 2300 tokens)
-  // Processing 6 articles in one request = 6x faster than individual
-  BATCH_SIZE: 6,
+  // BALANCED: Speed + Quality
+  // 4 articles × 2500 chars = enough context for accurate classification
+  BATCH_SIZE: 4,              // 4 articles per batch (quality over speed)
 
   // Maximum characters to send per article
-  // 1500 chars (~375 tokens) - Gemini has plenty of TPM headroom
-  MAX_CHARS_PER_ARTICLE: 1500,
+  // 2500 chars (~625 tokens) - captures УДК, title, author, abstract + intro
+  // This is enough to accurately classify the section
+  MAX_CHARS_PER_ARTICLE: 2500,
 
-  // Maximum tokens for batch response (6 articles × 150 tokens each)
-  MAX_TOKENS_BATCH: 1200,
+  // Maximum tokens for batch response (4 articles × 200 tokens each)
+  MAX_TOKENS_BATCH: 1000,
 
   // Maximum tokens for single analysis
-  MAX_TOKENS_SINGLE: 500,
+  MAX_TOKENS_SINGLE: 600,
 
   // Maximum tokens for spelling check
-  MAX_TOKENS_SPELLING: 400,
+  MAX_TOKENS_SPELLING: 500,
 
-  // Parallel processing settings
+  // Parallel processing settings (unchanged - doesn't affect quality)
   PARALLEL_BATCHES: 2,        // Process 2 batches simultaneously
   PARALLEL_SPELLING: 3        // 3 parallel spell checks
 };
