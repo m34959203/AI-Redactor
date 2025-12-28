@@ -604,8 +604,14 @@ const App = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-gray-800 transition-colors">
-      <div className="container mx-auto p-6 max-w-7xl">
+    <div className="min-h-screen bg-background relative overflow-hidden transition-colors">
+      {/* Background glow effects */}
+      <div className="fixed inset-0 pointer-events-none overflow-hidden">
+        <div className="absolute -top-32 -right-32 w-[600px] h-[600px] rounded-full bg-primary/20 blur-[120px] neural-pulse" />
+        <div className="absolute top-1/3 -left-40 w-[500px] h-[500px] rounded-full bg-accent/15 blur-[100px] neural-pulse" style={{ animationDelay: '1s' }} />
+        <div className="absolute bottom-0 right-1/4 w-[400px] h-[400px] rounded-full bg-primary/10 blur-[90px] neural-pulse" style={{ animationDelay: '2s' }} />
+      </div>
+      <div className="container mx-auto p-6 max-w-7xl relative z-10">
         <Header articlesCount={articles.length} isDark={isDark} onThemeToggle={toggleTheme} />
         <Tabs activeTab={activeTab} setActiveTab={actions.setActiveTab} />
 

@@ -11,20 +11,20 @@ const Tabs = ({ activeTab, setActiveTab }) => {
   ];
 
   return (
-    <nav className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl mb-6 transition-colors" aria-label="Основная навигация">
-      <div className="flex border-b border-gray-200 dark:border-gray-700 overflow-x-auto">
+    <nav className="glass-effect-strong rounded-2xl mb-6 p-2 transition-all duration-300" aria-label="Основная навигация">
+      <div className="flex gap-2 overflow-x-auto">
         {tabs.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             onClick={() => setActiveTab(id)}
-            className={`px-6 py-4 font-semibold transition-colors whitespace-nowrap focus:outline-none focus:ring-2 focus:ring-inset focus:ring-indigo-500 ${
+            className={`px-5 py-3 font-medium rounded-xl transition-all duration-200 whitespace-nowrap focus:outline-none focus:ring-2 focus:ring-ring flex items-center gap-2 ${
               activeTab === id
-                ? 'border-b-2 border-indigo-600 text-indigo-600 dark:text-indigo-400 dark:border-indigo-400'
-                : 'text-gray-600 dark:text-gray-300 hover:text-indigo-600 dark:hover:text-indigo-400'
+                ? 'bg-primary text-primary-foreground shadow-lg glow-primary'
+                : 'text-muted-foreground hover:text-foreground hover:bg-secondary'
             }`}
             aria-current={activeTab === id ? 'page' : undefined}
           >
-            <Icon className="inline mr-2" size={20} aria-hidden="true" />
+            <Icon size={18} aria-hidden="true" />
             {label}
           </button>
         ))}
