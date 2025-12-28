@@ -31,6 +31,7 @@ export const RATE_LIMIT_CONFIG = {
   // Optimized for maximum throughput within limits
   GROQ_DELAY: 2500,           // 2.5s (12K TPM with ~1500 tokens/req)
   OPENROUTER_DELAY: 1500,     // 1.5s (20 req/min = 3s, but we use burst capacity)
+  GEMINI_DELAY: 2000,         // 30 RPM = 2s between requests (PRIMARY)
 
   // Delay after hitting rate limit
   DELAY_AFTER_429: 10000,     // 10s wait on 429 (faster recovery)
@@ -88,6 +89,22 @@ export const PROVIDERS = {
       'Authorization': `Bearer ${apiKey}`,
       'HTTP-Referer': process.env.APP_URL || 'https://ai-redactor.railway.app',
       'X-Title': 'AI Journal Editor'
+    })
+  },
+  gemini: {
+    name: 'Google Gemini',
+    url: 'https://generativelanguage.googleapis.com/v1beta/models',
+    model: 'gemini-2.0-flash-lite',
+    // Flash-Lite has highest free tier: 1000 req/day, 30 RPM
+    fallbackModels: ['gemini-1.5-flash'],
+    keyEnv: 'GEMINI_API_KEY',
+    // Free tier limits (Dec 2025):
+    // - gemini-2.0-flash-lite: 1000 req/day, 30 RPM, 250K TPM
+    // - gemini-1.5-flash: 15 req/min, 1M tokens/min
+    rateLimit: { requestsPerMin: 30, requestsPerDay: 1000, tokensPerMin: 250000 },
+    // Gemini uses different API format - handled in aiService.js
+    headers: (apiKey) => ({
+      'Content-Type': 'application/json'
     })
   }
 };
