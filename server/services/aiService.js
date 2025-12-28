@@ -1591,7 +1591,8 @@ const filterSpellingErrors = (errors, isKazakhMode = false) => {
 /**
  * Check spelling for a single article
  * ALWAYS checks 100% of article content - no sampling or truncation
- * Supports: Russian, English, Kazakh (Kazakh uses Gemini preferentially)
+ * Supports: Russian, English, Kazakh
+ * AI detects language automatically during analysis (more accurate than regex)
  * If provider limits don't allow full check, throws error with message
  */
 export const checkSpelling = async (content, fileName) => {
@@ -1600,101 +1601,65 @@ export const checkSpelling = async (content, fileName) => {
   const cached = getCached(cacheKey);
   if (cached) return { fileName, ...cached };
 
-  const fallback = { errors: [], totalErrors: 0 };
-
-  // Detect language
-  const language = detectTextLanguage(content);
-  const isKazakh = language === 'kazakh';
+  const fallback = { errors: [], totalErrors: 0, language: 'cyrillic' };
 
   // ALWAYS use full content - 100% analysis required
   const textToCheck = content;
 
-  console.log(`Spell check "${fileName}": ${content.length} chars (100%), language=${language}, requesting full analysis`);
+  console.log(`Spell check "${fileName}": ${content.length} chars (100%), requesting AI analysis with language detection`);
 
-  // Build language-specific prompt
-  let prompt;
+  // Unified prompt that detects language AND checks spelling
+  const prompt = `## ЗАДАЧА / TASK / ТАПСЫРМА
+1. Определи ОСНОВНОЙ ЯЗЫК текста (русский, английский или казахский)
+2. Найди ОРФОГРАФИЧЕСКИЕ ОШИБКИ (опечатки)
 
-  if (isKazakh) {
-    // Kazakh-specific prompt (uses Gemini which has better Kazakh support)
-    prompt = `## ТАПСЫРМА / ЗАДАЧА
-Қазақ, орыс және ағылшын тілдеріндегі ОРФОГРАФИЯЛЫҚ ҚАТЕЛЕРДІ (қате жазылған сөздер) тап.
-Найди ОРФОГРАФИЧЕСКИЕ ОШИБКИ в тексте на казахском, русском и английском языках.
+## ОПРЕДЕЛЕНИЕ ЯЗЫКА:
+- "kazakh" — если текст на казахском языке (содержит казахские слова: және, бойынша, туралы, қазіргі, білім и т.д., или буквы Ә, Ғ, Қ, Ң, Ө, Ұ, Ү, І)
+- "cyrillic" — если текст на русском языке (кириллица без казахских особенностей)
+- "latin" — если текст на английском языке (латиница)
 
-## ОРФОГРАФИЯЛЫҚ ҚАТЕ ДЕГЕНІМІЗ / ЧТО ЯВЛЯЕТСЯ ОШИБКОЙ:
-- Қате әріп: "білім" емес "білім" дұрыс жазылған / Неправильная буква
-- Артық әріп: лишняя буква
-- Жетіспейтін әріп: пропущенная буква
-- Қазақ тіліндегі ерекше әріптер: Ә, Ғ, Қ, Ң, Ө, Ұ, Ү, І — дұрыс қолдануын тексер
-
-## ҚАТЕ ЕМЕС / НЕ ЯВЛЯЕТСЯ ОШИБКОЙ:
-❌ Синонимдер / Синонимы — разные слова с похожим значением
-❌ Стилистика — замена одного правильного слова другим
-❌ Грамматика — падежи, согласование
-❌ Есімдер, терминдер / Имена, термины, аббревиатуры
-
-## МЫСАЛДАР / ПРИМЕРЫ:
-✅ ҚАТЕ: {"word": "билім", "suggestion": "білім"} — қате әріп
-✅ ҚАТЕ: {"word": "эксперемент", "suggestion": "эксперимент"} — пропущена буква
-❌ ҚАТЕ ЕМЕС: синонимдерді ауыстыру
-
-## ЖАУАП ФОРМАТЫ / ФОРМАТ ОТВЕТА:
-{"errors": [{"word": "қате_сөз", "suggestion": "дұрыс_сөз", "context": "..."}], "totalErrors": N}
-
-Қате жоқ болса / Если ошибок нет: {"errors": [], "totalErrors": 0}
-
-## МӘТІН / ТЕКСТ:
-${textToCheck}`;
-  } else {
-    // Russian/English prompt
-    prompt = `## ЗАДАЧА
-Найди ТОЛЬКО ОРФОГРАФИЧЕСКИЕ ОШИБКИ (опечатки, неправильное написание букв).
+ВАЖНО: Определяй язык по СОДЕРЖАНИЮ текста, а не по отдельным словам. Казахские имена авторов в русском тексте НЕ делают текст казахским.
 
 ## ЧТО ЯВЛЯЕТСЯ ОРФОГРАФИЧЕСКОЙ ОШИБКОЙ:
-- Пропущенная буква: "эксперемент" → "эксперимент"
-- Лишняя буква: "расчёт" написано "рассчёт"
-- Неправильная буква: "обьект" → "объект", "прецендент" → "прецедент"
-- Перепутанные буквы: "колличество" → "количество"
+- Пропущенная/лишняя/неправильная буква: "эксперемент" → "эксперимент"
+- Для казахского: неправильное использование Ә, Ғ, Қ, Ң, Ө, Ұ, Ү, І
 
-## ЧТО НЕ ЯВЛЯЕТСЯ ОРФОГРАФИЧЕСКОЙ ОШИБКОЙ (ИГНОРИРУЙ!):
-❌ СИНОНИМЫ: disperse/deflect, decrease/reduction, especially/particularly — это РАЗНЫЕ слова, НЕ ошибки!
-❌ СТИЛИСТИКА: замена одного правильного слова другим правильным
-❌ ГРАММАТИКА: падежи, согласование, времена глаголов
-❌ ДОБАВЛЕНИЕ СЛОВ: "экологически" → "экологически чистой" — НЕ ошибка!
-❌ ТЕРМИНЫ, ИМЕНА, АББРЕВИАТУРЫ
+## ЧТО НЕ ЯВЛЯЕТСЯ ОШИБКОЙ (ИГНОРИРУЙ):
+❌ Синонимы — разные слова с похожим значением
+❌ Стилистика — замена правильного слова другим правильным
+❌ Грамматика — падежи, согласование
+❌ Термины, имена, аббревиатуры
 
-## КРИТЕРИЙ ПРОВЕРКИ:
-Ошибка = слово написано с НЕПРАВИЛЬНЫМИ БУКВАМИ (опечатка).
-НЕ ошибка = правильно написанное слово, которое можно заменить синонимом.
+## ФОРМАТ ОТВЕТА (JSON):
+{"language": "cyrillic|kazakh|latin", "errors": [{"word": "ошибка", "suggestion": "исправление", "context": "..."}], "totalErrors": N}
 
-## ПРИМЕРЫ:
-✅ ОШИБКА: {"word": "эксперемент", "suggestion": "эксперимент"} — пропущена буква "и"
-✅ ОШИБКА: {"word": "обьект", "suggestion": "объект"} — неправильный мягкий знак
-✅ ОШИБКА: {"word": "колличество", "suggestion": "количество"} — лишняя "л"
-❌ НЕ ОШИБКА: {"word": "disperse", "suggestion": "deflect"} — это разные слова!
-❌ НЕ ОШИБКА: {"word": "decrease", "suggestion": "reduction"} — это синонимы!
-❌ НЕ ОШИБКА: {"word": "especially", "suggestion": "particularly"} — оба слова правильные!
-
-## ФОРМАТ ОТВЕТА:
-{"errors": [{"word": "слово_с_опечаткой", "suggestion": "правильное_написание", "context": "...фрагмент текста..."}], "totalErrors": N}
-
-Если орфографических ошибок нет: {"errors": [], "totalErrors": 0}
+Если ошибок нет: {"language": "detected_language", "errors": [], "totalErrors": 0}
 
 ## ТЕКСТ:
 ${textToCheck}`;
-  }
 
   try {
     const maxTokens = BATCH_CONFIG.MAX_TOKENS_SPELLING || 1500;
 
-    // For Kazakh text, prefer Gemini (better multilingual support)
-    const options = isKazakh && process.env.GEMINI_API_KEY && !checkGeminiDailyLimit()
-      ? { forceProvider: 'gemini' }
-      : {};
-
-    const response = await makeAIRequest(prompt, maxTokens, 'spelling', options);
+    const response = await makeAIRequest(prompt, maxTokens, 'spelling', {});
     const result = safeJsonParse(response, fallback);
 
-    // For Kazakh, use less aggressive filtering (Gemini handles it better)
+    // Get AI-detected language (fallback to regex detection if AI didn't return it)
+    let detectedLanguage = result.language;
+    if (!detectedLanguage || !['kazakh', 'cyrillic', 'latin'].includes(detectedLanguage)) {
+      // Fallback to character-based detection
+      detectedLanguage = detectTextLanguage(content);
+      // Map 'russian'/'english' to 'cyrillic'/'latin' for consistency
+      if (detectedLanguage === 'russian') detectedLanguage = 'cyrillic';
+      if (detectedLanguage === 'english') detectedLanguage = 'latin';
+      if (!['kazakh', 'cyrillic', 'latin'].includes(detectedLanguage)) {
+        detectedLanguage = 'cyrillic';
+      }
+    }
+
+    const isKazakh = detectedLanguage === 'kazakh';
+
+    // For Kazakh, use less aggressive filtering (AI handles it better)
     const validErrors = isKazakh
       ? filterSpellingErrors(result.errors || [], true)
       : filterSpellingErrors(result.errors || [], false);
@@ -1703,8 +1668,10 @@ ${textToCheck}`;
       errors: validErrors,
       totalErrors: validErrors.length,
       coverage: 100, // Always 100%
-      language
+      language: detectedLanguage
     };
+
+    console.log(`Spell check "${fileName}": AI detected language="${detectedLanguage}", found ${validErrors.length} errors`);
 
     // Cache the result
     setCache(cacheKey, spellingResult);

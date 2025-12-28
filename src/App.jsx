@@ -297,6 +297,29 @@ const App = () => {
         // Сохраняем результаты проверки орфографии
         if (spellCheckResults.length > 0) {
           actions.addSpellCheckResults(spellCheckResults);
+
+          // Обновляем язык статей на основе AI-анализа (более точное определение)
+          let languageUpdated = false;
+          for (const result of spellCheckResults) {
+            if (result.language && result.fileName) {
+              const article = newArticles.find(a => a.file?.name === result.fileName);
+              if (article && article.language !== result.language) {
+                console.log(`Language update for "${result.fileName}": ${article.language} → ${result.language} (AI detection)`);
+                actions.updateArticle(article.id, { language: result.language });
+                languageUpdated = true;
+              }
+            }
+          }
+
+          // Пересортируем статьи если язык изменился
+          if (languageUpdated) {
+            const updatedArticles = articles.map(a => {
+              const result = spellCheckResults.find(r => r.fileName === a.file?.name);
+              return result?.language ? { ...a, language: result.language } : a;
+            });
+            const resortedArticles = sortArticlesBySectionAndLanguage(updatedArticles);
+            actions.setArticles(resortedArticles);
+          }
         }
 
         // Формируем итоговое сообщение
