@@ -1487,7 +1487,10 @@ const filterSpellingErrors = (errors) => {
 
 /**
  * Check spelling for a single article
- * Smart chunking: uses full content for Gemini, chunks for Groq (12K TPM limit)
+ * Strategy:
+ * - Gemini (250K TPM): Full article in ONE request
+ * - Groq (12K TPM): Sample first 4000 chars (intro + methodology) - ONE request
+ * This avoids multiple requests that exhaust rate limits quickly
  */
 export const checkSpelling = async (content, fileName) => {
   // Check cache first
@@ -1497,26 +1500,20 @@ export const checkSpelling = async (content, fileName) => {
 
   const fallback = { errors: [], totalErrors: 0 };
 
-  // Determine max content size based on available provider
-  // Groq: 12K TPM = ~6000 chars (with prompt overhead ~3000 tokens)
-  // Gemini: 250K TPM = unlimited for typical articles
+  // Determine content strategy based on available provider
+  // Gemini: 250K TPM = full article in one request
+  // Groq: 12K TPM = sample first 4000 chars (saves tokens, one request)
   const geminiAvailable = process.env.GEMINI_API_KEY && !checkGeminiDailyLimit();
-  const maxCharsPerChunk = geminiAvailable ? 50000 : 6000; // Gemini can handle full article
 
-  // Split content into chunks if needed
-  const chunks = [];
-  for (let i = 0; i < content.length; i += maxCharsPerChunk) {
-    chunks.push(content.substring(i, i + maxCharsPerChunk));
-  }
+  // For Groq: 4000 chars ≈ 1000 tokens + 500 token prompt = 1500 tokens per request
+  // This allows ~8 spell checks per minute on Groq (12K TPM / 1.5K = 8)
+  const maxChars = geminiAvailable ? content.length : 4000;
+  const textToCheck = content.substring(0, maxChars);
+  const coverage = Math.round((textToCheck.length / content.length) * 100);
 
-  console.log(`Spell check "${fileName}": ${content.length} chars, ${chunks.length} chunk(s), provider=${geminiAvailable ? 'Gemini' : 'Groq'}`);
+  console.log(`Spell check "${fileName}": ${textToCheck.length}/${content.length} chars (${coverage}%), provider=${geminiAvailable ? 'Gemini' : 'Groq'}`);
 
-  const allErrors = [];
-
-  for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex++) {
-    const textToCheck = chunks[chunkIndex];
-
-    const prompt = `## ЗАДАЧА
+  const prompt = `## ЗАДАЧА
 Найди ТОЛЬКО реальные орфографические ОШИБКИ в тексте.
 
 ## КРИТИЧНО - ИГНОРИРУЙ:
@@ -1540,30 +1537,29 @@ export const checkSpelling = async (content, fileName) => {
 
 Если ошибок нет: {"errors": [], "totalErrors": 0}
 
-## ТЕКСТ (часть ${chunkIndex + 1}/${chunks.length}):
+## ТЕКСТ:
 ${textToCheck}`;
 
-    try {
-      const maxTokens = BATCH_CONFIG.MAX_TOKENS_SPELLING || 1500;
-      const response = await makeAIRequest(prompt, maxTokens, 'spelling');
-      const result = safeJsonParse(response, fallback);
+  try {
+    const maxTokens = BATCH_CONFIG.MAX_TOKENS_SPELLING || 1500;
+    const response = await makeAIRequest(prompt, maxTokens, 'spelling');
+    const result = safeJsonParse(response, fallback);
 
-      if (result.errors && Array.isArray(result.errors)) {
-        allErrors.push(...result.errors);
-      }
-    } catch (error) {
-      console.error(`Spell check chunk ${chunkIndex + 1} error:`, error.message);
-      // Continue with other chunks even if one fails
-    }
+    const validErrors = filterSpellingErrors(result.errors || []);
+    const spellingResult = {
+      errors: validErrors,
+      totalErrors: validErrors.length,
+      coverage // Add coverage info so UI can show it
+    };
+
+    // Cache the result
+    setCache(cacheKey, spellingResult);
+
+    return { fileName, ...spellingResult };
+  } catch (error) {
+    console.error(`Spell check error for "${fileName}":`, error.message);
+    return { fileName, ...fallback };
   }
-
-  const validErrors = filterSpellingErrors(allErrors);
-  const spellingResult = { errors: validErrors, totalErrors: validErrors.length };
-
-  // Cache the result
-  setCache(cacheKey, spellingResult);
-
-  return { fileName, ...spellingResult };
 };
 
 /**
