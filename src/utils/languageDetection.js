@@ -13,7 +13,11 @@ import {
 const KAZAKH_SPECIFIC = /[ӘәҒғҚқҢңӨөҰұҮүҺһІі]/;
 
 // Common Kazakh words that use standard Cyrillic but are distinctly Kazakh
-const KAZAKH_WORDS = /\b(және|бойынша|туралы|арқылы|қатысты|жүйесі|дамуы|бағыттары|мүмкіндіктері|саласында|жағдайы|қазіргі|еңбек|қорғау|білім|беру|жасанды|интеллект|қолдану|республикасы|қазақстан|мемлекет|тіл|ұлт|халық|ел|жер|су|от|ауа|күн|ай|жыл|адам|бала|ата|ана|әке|шеше|үй|қала|ауыл|жол|көше|дүние|әлем|өмір|тарих|мәдениет|ғылым|техника|экономика|саясат|құқық|заң|денсаулық|медицина|экология|табиғат)\b/i;
+// IMPORTANT: Do NOT include words that exist in Russian with the same spelling:
+// - от (Russian preposition "from")
+// - экономика, медицина, экология, техника (international words, same in Russian)
+// Only include words that are uniquely Kazakh or have Kazakh-specific spelling
+const KAZAKH_WORDS = /\b(және|бойынша|туралы|арқылы|қатысты|жүйесі|дамуы|бағыттары|мүмкіндіктері|саласында|жағдайы|қазіргі|еңбек|қорғау|білім|беру|жасанды|интеллект|қолдану|республикасы|қазақстан|мемлекет|тіл|ұлт|халық|жер|су|ауа|күн|жыл|адам|бала|ата|ана|әке|шеше|үй|қала|ауыл|жол|көше|дүние|әлем|өмір|тарих|мәдениет|ғылым|саясат|құқық|заң|денсаулық|табиғат)\b/i;
 
 // Standard Cyrillic (Russian and Kazakh share these)
 const CYRILLIC_PATTERN = /[а-яА-ЯёЁ]/;
