@@ -1458,6 +1458,44 @@ const KAZAKH_PATTERN = /[ӘәҒғҚқҢңӨөҰұҮүҺһІі]/;
 // Common Kazakh words without special characters
 const KAZAKH_WORDS = /^(сауаттылық|білім|оқыту|мектеп|тіл|және|бойынша|туралы|арқылы|жүйесі|дамуы|қазақ|орыс|математикалық|жағдайда|сабақ|оқушы|мұғалім|әдіс|тәсіл|ұйым|жұмыс|бағдарлама|ғылым|тарих|мәдениет|қоғам|мемлекет|заң|құқық|денсаулық|спорт|өнер|музыка)$/i;
 
+// Known synonym pairs that are NOT spelling errors
+const SYNONYM_PAIRS = [
+  ['disperse', 'deflect'], ['decrease', 'reduction'], ['especially', 'particularly'],
+  ['increase', 'growth'], ['important', 'significant'], ['use', 'utilize'],
+  ['show', 'demonstrate'], ['help', 'assist'], ['big', 'large'], ['small', 'little'],
+  ['start', 'begin'], ['end', 'finish'], ['make', 'create'], ['get', 'obtain'],
+  ['give', 'provide'], ['take', 'receive'], ['also', 'additionally'], ['but', 'however'],
+  ['экологический', 'экологически'], ['чистый', 'чистой']
+];
+
+/**
+ * Calculate similarity ratio between two strings (0-1)
+ * Typos should have high similarity (>0.5), synonyms have low similarity
+ */
+const calculateSimilarity = (str1, str2) => {
+  const s1 = str1.toLowerCase();
+  const s2 = str2.toLowerCase();
+
+  if (s1 === s2) return 1;
+  if (s1.length === 0 || s2.length === 0) return 0;
+
+  // Simple character overlap ratio
+  const chars1 = new Set(s1.split(''));
+  const chars2 = new Set(s2.split(''));
+  const intersection = [...chars1].filter(c => chars2.has(c)).length;
+  const union = new Set([...chars1, ...chars2]).size;
+
+  const charSimilarity = intersection / union;
+
+  // Length similarity
+  const lengthDiff = Math.abs(s1.length - s2.length);
+  const maxLength = Math.max(s1.length, s2.length);
+  const lengthSimilarity = 1 - (lengthDiff / maxLength);
+
+  // Combined similarity
+  return (charSimilarity * 0.6 + lengthSimilarity * 0.4);
+};
+
 /**
  * Filter out false positive spelling errors
  */
@@ -1480,6 +1518,29 @@ const filterSpellingErrors = (errors) => {
 
     // Filter out common Kazakh words even without special characters
     if (KAZAKH_WORDS.test(word)) return false;
+
+    // Filter out known synonym pairs
+    for (const [syn1, syn2] of SYNONYM_PAIRS) {
+      if ((normalizedWord.includes(syn1) && normalizedSuggestion.includes(syn2)) ||
+          (normalizedWord.includes(syn2) && normalizedSuggestion.includes(syn1))) {
+        console.log(`Filtered synonym pair: "${word}" -> "${suggestion}"`);
+        return false;
+      }
+    }
+
+    // Filter out suggestions that are completely different words (synonyms)
+    // Real typos should have similarity > 0.4
+    const similarity = calculateSimilarity(word, suggestion);
+    if (similarity < 0.4) {
+      console.log(`Filtered low-similarity suggestion (${similarity.toFixed(2)}): "${word}" -> "${suggestion}"`);
+      return false;
+    }
+
+    // Filter out multi-word suggestions (like "экологически" -> "экологически чистой")
+    if (suggestion.split(/\s+/).length > word.split(/\s+/).length + 1) {
+      console.log(`Filtered multi-word addition: "${word}" -> "${suggestion}"`);
+      return false;
+    }
 
     return true;
   });
@@ -1504,30 +1565,40 @@ export const checkSpelling = async (content, fileName) => {
   console.log(`Spell check "${fileName}": ${content.length} chars (100%), requesting full analysis`);
 
   const prompt = `## ЗАДАЧА
-Найди ТОЛЬКО реальные орфографические ОШИБКИ в тексте.
+Найди ТОЛЬКО ОРФОГРАФИЧЕСКИЕ ОШИБКИ (опечатки, неправильное написание букв).
 
-## КРИТИЧНО - ИГНОРИРУЙ:
-- ВСЕ казахские слова (с буквами Ә, Ғ, Қ, Ң, Ө, Ұ, Ү, Һ, І)
-- Казахские слова без специальных букв (сауаттылық, білім, оқыту, мектеп, тіл, және т.д.)
-- Термины, имена, аббревиатуры
-- Слова из названий и заголовков
+## ЧТО ЯВЛЯЕТСЯ ОРФОГРАФИЧЕСКОЙ ОШИБКОЙ:
+- Пропущенная буква: "эксперемент" → "эксперимент"
+- Лишняя буква: "расчёт" написано "рассчёт"
+- Неправильная буква: "обьект" → "объект", "прецендент" → "прецедент"
+- Перепутанные буквы: "колличество" → "количество"
 
-## ПРАВИЛА:
-1. word и suggestion ДОЛЖНЫ быть РАЗНЫМИ!
-2. Если не уверен что это ошибка — НЕ ДОБАВЛЯЙ
-3. Проверяй только РУССКИЙ и АНГЛИЙСКИЙ текст
+## ЧТО НЕ ЯВЛЯЕТСЯ ОРФОГРАФИЧЕСКОЙ ОШИБКОЙ (ИГНОРИРУЙ!):
+❌ СИНОНИМЫ: disperse/deflect, decrease/reduction, especially/particularly — это РАЗНЫЕ слова, НЕ ошибки!
+❌ СТИЛИСТИКА: замена одного правильного слова другим правильным
+❌ ГРАММАТИКА: падежи, согласование, времена глаголов
+❌ ДОБАВЛЕНИЕ СЛОВ: "экологически" → "экологически чистой" — НЕ ошибка!
+❌ КАЗАХСКИЕ СЛОВА: любые слова с Ә, Ғ, Қ, Ң, Ө, Ұ, Ү, І
+❌ ТЕРМИНЫ, ИМЕНА, АББРЕВИАТУРЫ
+
+## КРИТЕРИЙ ПРОВЕРКИ:
+Ошибка = слово написано с НЕПРАВИЛЬНЫМИ БУКВАМИ (опечатка).
+НЕ ошибка = правильно написанное слово, которое можно заменить синонимом.
 
 ## ПРИМЕРЫ:
-✅ ВЕРНО: {"word": "эксперемент", "suggestion": "эксперимент"}
-✅ ВЕРНО: {"word": "обьект", "suggestion": "объект"}
-❌ НЕВЕРНО: {"word": "сауаттылық", "suggestion": "сауаттылық"} — это казахское слово!
+✅ ОШИБКА: {"word": "эксперемент", "suggestion": "эксперимент"} — пропущена буква "и"
+✅ ОШИБКА: {"word": "обьект", "suggestion": "объект"} — неправильный мягкий знак
+✅ ОШИБКА: {"word": "колличество", "suggestion": "количество"} — лишняя "л"
+❌ НЕ ОШИБКА: {"word": "disperse", "suggestion": "deflect"} — это разные слова!
+❌ НЕ ОШИБКА: {"word": "decrease", "suggestion": "reduction"} — это синонимы!
+❌ НЕ ОШИБКА: {"word": "especially", "suggestion": "particularly"} — оба слова правильные!
 
 ## ФОРМАТ ОТВЕТА:
-{"errors": [{"word": "ошибка", "suggestion": "правильно", "context": "..."}], "totalErrors": N}
+{"errors": [{"word": "слово_с_опечаткой", "suggestion": "правильное_написание", "context": "...фрагмент текста..."}], "totalErrors": N}
 
-Если ошибок нет: {"errors": [], "totalErrors": 0}
+Если орфографических ошибок нет: {"errors": [], "totalErrors": 0}
 
-## ТЕКСТ (полный, ${content.length} символов):
+## ТЕКСТ:
 ${textToCheck}`;
 
   try {
