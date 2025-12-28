@@ -1465,7 +1465,7 @@ const filterSpellingErrors = (errors) => {
 
 /**
  * Check spelling for a single article
- * Uses OpenRouter when available (200 req/day) to avoid Groq's 6K TPM limit
+ * Smart chunking: uses full content for Gemini, chunks for Groq (12K TPM limit)
  */
 export const checkSpelling = async (content, fileName) => {
   // Check cache first
@@ -1473,10 +1473,28 @@ export const checkSpelling = async (content, fileName) => {
   const cached = getCached(cacheKey);
   if (cached) return { fileName, ...cached };
 
-  // Full article content - Gemini has 250K TPM, plenty for complete spell check
-  const textToCheck = content;
+  const fallback = { errors: [], totalErrors: 0 };
 
-  const prompt = `## ЗАДАЧА
+  // Determine max content size based on available provider
+  // Groq: 12K TPM = ~6000 chars (with prompt overhead ~3000 tokens)
+  // Gemini: 250K TPM = unlimited for typical articles
+  const geminiAvailable = process.env.GEMINI_API_KEY && !checkGeminiDailyLimit();
+  const maxCharsPerChunk = geminiAvailable ? 50000 : 6000; // Gemini can handle full article
+
+  // Split content into chunks if needed
+  const chunks = [];
+  for (let i = 0; i < content.length; i += maxCharsPerChunk) {
+    chunks.push(content.substring(i, i + maxCharsPerChunk));
+  }
+
+  console.log(`Spell check "${fileName}": ${content.length} chars, ${chunks.length} chunk(s), provider=${geminiAvailable ? 'Gemini' : 'Groq'}`);
+
+  const allErrors = [];
+
+  for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex++) {
+    const textToCheck = chunks[chunkIndex];
+
+    const prompt = `## ЗАДАЧА
 Найди ТОЛЬКО реальные орфографические ОШИБКИ в тексте.
 
 ## КРИТИЧНО - ИГНОРИРУЙ:
@@ -1494,38 +1512,36 @@ export const checkSpelling = async (content, fileName) => {
 ✅ ВЕРНО: {"word": "эксперемент", "suggestion": "эксперимент"}
 ✅ ВЕРНО: {"word": "обьект", "suggestion": "объект"}
 ❌ НЕВЕРНО: {"word": "сауаттылық", "suggestion": "сауаттылық"} — это казахское слово!
-❌ НЕВЕРНО: {"word": "математикалық", "suggestion": "математикалық"} — это казахское слово!
 
 ## ФОРМАТ ОТВЕТА:
 {"errors": [{"word": "ошибка", "suggestion": "правильно", "context": "..."}], "totalErrors": N}
 
 Если ошибок нет: {"errors": [], "totalErrors": 0}
 
-## ТЕКСТ:
+## ТЕКСТ (часть ${chunkIndex + 1}/${chunks.length}):
 ${textToCheck}`;
 
-  const fallback = { errors: [], totalErrors: 0 };
+    try {
+      const maxTokens = BATCH_CONFIG.MAX_TOKENS_SPELLING || 1500;
+      const response = await makeAIRequest(prompt, maxTokens, 'spelling');
+      const result = safeJsonParse(response, fallback);
 
-  try {
-    // Use configured token limit for spelling to conserve TPM
-    const maxTokens = BATCH_CONFIG.MAX_TOKENS_SPELLING || 500;
-
-    // Gemini is now primary with 250K TPM - plenty for spelling
-    // No need to force fallback anymore
-    const response = await makeAIRequest(prompt, maxTokens, 'spelling');
-    const result = safeJsonParse(response, fallback);
-
-    const validErrors = filterSpellingErrors(result.errors);
-    const spellingResult = { errors: validErrors, totalErrors: validErrors.length };
-
-    // Cache the result
-    setCache(cacheKey, spellingResult);
-
-    return { fileName, ...spellingResult };
-  } catch (error) {
-    console.error('Spell check error:', error);
-    return { fileName, ...fallback };
+      if (result.errors && Array.isArray(result.errors)) {
+        allErrors.push(...result.errors);
+      }
+    } catch (error) {
+      console.error(`Spell check chunk ${chunkIndex + 1} error:`, error.message);
+      // Continue with other chunks even if one fails
+    }
   }
+
+  const validErrors = filterSpellingErrors(allErrors);
+  const spellingResult = { errors: validErrors, totalErrors: validErrors.length };
+
+  // Cache the result
+  setCache(cacheKey, spellingResult);
+
+  return { fileName, ...spellingResult };
 };
 
 /**
@@ -1593,8 +1609,18 @@ const processSpellingArticle = async (article) => {
 
 /**
  * Review article
+ * Smart content sizing: full content for Gemini, limited for Groq
  */
 export const reviewArticle = async (content, fileName) => {
+  // Determine content limit based on available provider
+  // Groq: 12K TPM = ~6000 chars for content (with prompt overhead)
+  // Gemini: 250K TPM = can handle full article
+  const geminiAvailable = process.env.GEMINI_API_KEY && !checkGeminiDailyLimit();
+  const maxChars = geminiAvailable ? content.length : 8000; // Groq: 8000 chars to stay under 12K TPM
+  const textToReview = content.substring(0, maxChars);
+
+  console.log(`Review "${fileName}": ${content.length} chars, using ${textToReview.length} chars, provider=${geminiAvailable ? 'Gemini' : 'Groq'}`);
+
   const prompt = `Проведи рецензию научной статьи.
 
 ШКАЛА (1-5): 1-неприемлемо, 2-слабо, 3-удовл., 4-хорошо, 5-отлично
@@ -1607,7 +1633,7 @@ export const reviewArticle = async (content, fileName) => {
 5. relevance: актуальность темы
 
 ТЕКСТ (${fileName}):
-${content}
+${textToReview}
 
 Ответь JSON:
 {
