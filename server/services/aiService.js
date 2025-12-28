@@ -479,6 +479,55 @@ const detectSectionFromContent = (content, title = '') => {
   return { section: null, confidence: 0 };
 };
 
+/**
+ * Extract author from article content using regex patterns
+ * @param {string} content - Article content
+ * @returns {string|null} - Extracted author or null
+ */
+const extractAuthorFromContent = (content) => {
+  if (!content) return null;
+
+  // Take first 3000 chars where author is usually located
+  const text = content.substring(0, 3000);
+
+  // Patterns for author extraction (ordered by reliability)
+  const patterns = [
+    // "Автор: Иванов А.Б." or "Author: Ivanov A.B."
+    /(?:автор|author|авторы|authors)[\s:]+([А-ЯЁӘҒҚҢӨҮІа-яёәғқңөүіA-Za-z]+\s+[А-ЯЁӘҒҚҢӨҮІа-яёәғқңөүіA-Za-z]\.[А-ЯЁӘҒҚҢӨҮІа-яёәғқңөүіA-Za-z]?\.?)/i,
+
+    // After UDK/УДК: Title \n Author (common format)
+    /(?:УДК|UDC|ӘОЖ)[\s\d.]+[^\n]+\n+([А-ЯЁӘҒҚҢӨҮІа-яёәғқңөүі][а-яёәғқңөүі]+\s+[А-ЯЁӘҒҚҢӨҮІа-яёәғқңөүі]\.[А-ЯЁӘҒҚҢӨҮІа-яёәғқңөүі]?\.?)/i,
+
+    // "Фамилия И.О." pattern with affiliation (university, etc.)
+    /([А-ЯЁӘҒҚҢӨҮІа-яёәғқңөүі][а-яёәғқңөүі]+\s+[А-ЯЁӘҒҚҢӨҮІ]\.[А-ЯЁӘҒҚҢӨҮІ]?\.?)[\s,]*(?:магистр|докторант|профессор|доцент|к\.\s*[а-я]+\.\s*н|PhD|университет|институт|академия)/i,
+
+    // "И.О. Фамилия" pattern
+    /([А-ЯЁӘҒҚҢӨҮІ]\.[А-ЯЁӘҒҚҢӨҮІ]?\.?\s+[А-ЯЁӘҒҚҢӨҮІа-яёәғқңөүі][а-яёәғқңөүі]+)[\s,]*(?:магистр|докторант|профессор|доцент|к\.\s*[а-я]+\.\s*н|PhD|университет)/i,
+
+    // Simple "Фамилия И.О." anywhere
+    /\b([А-ЯЁӘҒҚҢӨҮІа-яёәғқңөүі][а-яёәғқңөүі]{2,}\s+[А-ЯЁӘҒҚҢӨҮІ]\.[А-ЯЁӘҒҚҢӨҮІ]?\.?)\b/,
+
+    // Full name "Фамилия Имя Отчество" before annotation
+    /([А-ЯЁӘҒҚҢӨҮІа-яёәғқңөүі][а-яёәғқңөүі]+\s+[А-ЯЁӘҒҚҢӨҮІа-яёәғқңөүі][а-яёәғқңөүі]+\s+[А-ЯЁӘҒҚҢӨҮІа-яёәғқңөүі][а-яёәғқңөүі]+)[\s,]*(?:аннотация|abstract|annotation|түйін)/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match && match[1]) {
+      const author = match[1].trim();
+      // Validate: should be 2-50 chars and not look like a title
+      if (author.length >= 2 && author.length <= 50 &&
+          !author.toUpperCase().includes('УДК') &&
+          !author.toUpperCase().includes('НАУК') &&
+          !author.match(/^\d/)) {
+        return author;
+      }
+    }
+  }
+
+  return null;
+};
+
 // ============ JSON PARSING ============
 
 const extractJsonFromResponse = (response) => {
@@ -1044,19 +1093,27 @@ export const analyzeArticlesBatch = async (articles) => {
   const prompt = `## ЗАДАЧА
 Проанализируй ${uncachedArticles.length} научных статей и верни JSON массив с ${uncachedArticles.length} элементами.
 
-## КРИТИЧНЫЕ ПРАВИЛА:
-1. КАЖДЫЙ элемент массива ОБЯЗАН содержать поле "section" с ТОЧНЫМ названием раздела!
-2. Если не можешь определить раздел — выбери наиболее подходящий на основе содержания
+## КРИТИЧНЫЕ ПРАВИЛА (ВСЕ ПОЛЯ ОБЯЗАТЕЛЬНЫ!):
+1. КАЖДЫЙ элемент ОБЯЗАН содержать ВСЕ поля: fileName, title, author, section, sectionConfidence
+2. НИКОГДА не возвращай "undefined" или null - если не нашёл, извлеки из имени файла!
+3. Если раздел не определён - выбери наиболее подходящий по содержанию
 
 ## РАЗДЕЛЫ (выбери ОДИН для КАЖДОЙ статьи):
-- "ТЕХНИЧЕСКИЕ НАУКИ" — IT, инженерия, программирование, строительство, технологии, компьютеры
-- "ПЕДАГОГИЧЕСКИЕ НАУКИ" — образование, методика преподавания, педагогика, обучение, школа, студенты
-- "ЕСТЕСТВЕННЫЕ И ЭКОНОМИЧЕСКИЕ НАУКИ" — физика, химия, биология, экономика, финансы, математика, экология
+- "ТЕХНИЧЕСКИЕ НАУКИ" — IT, инженерия, программирование, строительство, технологии, компьютеры, цифровизация
+- "ПЕДАГОГИЧЕСКИЕ НАУКИ" — образование, методика преподавания, педагогика, обучение, школа, студенты, дидактика
+- "ЕСТЕСТВЕННЫЕ И ЭКОНОМИЧЕСКИЕ НАУКИ" — физика, химия, биология, экономика, финансы, математика, экология, медицина
 
-## ИЗВЛЕЧЕНИЕ ДАННЫХ:
-- НАЗВАНИЕ: после УДК/UDC, до авторов (на языке оригинала!)
-- АВТОР: ищи после названия, форматы: "Фамилия И.О." или "И.О. Фамилия"
-- Казахские имена сохраняй как есть: "Қалжанова Г.М.", "Нығызбаева П.Т."
+## ИЗВЛЕЧЕНИЕ АВТОРА (КРИТИЧНО!):
+1. Ищи ПОСЛЕ названия статьи, ПЕРЕД аннотацией/abstract
+2. Форматы: "Фамилия И.О.", "И.О. Фамилия", "Фамилия Имя Отчество"
+3. Казахские: "Қайрат Е.Қ.", "Макишева Э.И.", "Нұрбек А.Б." — сохраняй КАК ЕСТЬ с буквами Қ,Ғ,Ү,Ө,Ә,Ң
+4. ЕСЛИ автор в имени файла (напр. "Қайрат Е.Қ..docx") — извлеки оттуда!
+5. НИКОГДА не пиши "undefined" — если не нашёл, возьми из имени файла без расширения
+
+## ИЗВЛЕЧЕНИЕ НАЗВАНИЯ:
+- После УДК/UDC, до списка авторов
+- На языке оригинала (казахский/русский/английский)
+- НЕ переводи!
 ${BATCH_EXAMPLE}
 ## СТАТЬИ ДЛЯ АНАЛИЗА:
 ${articlesText}
@@ -1148,8 +1205,34 @@ ${articlesText}
       console.log(`Section match result for "${article.fileName}": ${matchedSection ? `MATCHED -> "${matchedSection}"` : 'NO MATCH -> ТРЕБУЕТ КЛАССИФИКАЦИИ'}`);
 
       let author = result.author;
-      if (!author || author === 'null' || author === 'Не указан' || !author.trim()) {
-        author = 'Автор не указан';
+      // Check if author is invalid (undefined, null, empty, or literal "undefined" string)
+      const isInvalidAuthor = !author ||
+        author === 'null' ||
+        author === 'undefined' ||
+        author === 'Не указан' ||
+        author === 'Автор не указан' ||
+        !author.trim();
+
+      if (isInvalidAuthor) {
+        // FALLBACK 1: Try to extract author from article content using regex patterns
+        const contentAuthor = extractAuthorFromContent(article.content);
+        if (contentAuthor) {
+          author = contentAuthor;
+          console.log(`Extracted author from content: "${article.fileName}" -> "${author}"`);
+        } else {
+          // FALLBACK 2: Try to extract from filename (e.g., "Қайрат Е.Қ..docx")
+          const fileNameWithoutExt = article.fileName.replace(/\.docx$/i, '').trim();
+          const looksLikeName = /[А-ЯЁӘҒҚҢӨҮІа-яёәғқңөүі]\.\s*[А-ЯЁӘҒҚҢӨҮІа-яёәғқңөүі]\.?/i.test(fileNameWithoutExt) ||
+            /^[А-ЯЁӘҒҚҢӨҮІа-яёәғқңөүі]+\s+[А-ЯЁӘҒҚҢӨҮІа-яёәғқңөүі]/i.test(fileNameWithoutExt);
+
+          if (looksLikeName && fileNameWithoutExt.length < 50) {
+            author = fileNameWithoutExt;
+            console.log(`Extracted author from filename: "${article.fileName}" -> "${author}"`);
+          } else {
+            author = 'Автор не указан';
+            console.log(`Could not extract author for: "${article.fileName}"`);
+          }
+        }
       }
       author = author.trim().replace(/,\s*$/, '').replace(/\s+/g, ' ');
 
