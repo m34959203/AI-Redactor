@@ -679,7 +679,7 @@ const makeGeminiRequest = async (prompt, maxTokens, apiKey, model) => {
 // ============ CORE AI REQUEST ============
 
 const makeAIRequest = async (prompt, maxTokens = 1000, taskType = 'general', options = {}) => {
-  const { forceFallback = false, forceGemini = false, retryCount = 0, modelIndex = 0 } = options;
+  const { forceFallback = false, forceGemini = false, forceProvider = null, retryCount = 0, modelIndex = 0 } = options;
 
   // Check if all providers are exhausted BEFORE making request
   if (areAllProvidersExhausted()) {
@@ -689,6 +689,15 @@ const makeAIRequest = async (prompt, maxTokens = 1000, taskType = 'general', opt
 
   // Get provider
   let activeConfig = getActiveProvider();
+
+  // Force specific provider if requested
+  if (forceProvider === 'groq' && process.env.GROQ_API_KEY) {
+    activeConfig = { provider: PROVIDERS.groq, apiKey: process.env.GROQ_API_KEY };
+  } else if (forceProvider === 'openrouter' && process.env.OPENROUTER_API_KEY) {
+    activeConfig = { provider: PROVIDERS.openrouter, apiKey: process.env.OPENROUTER_API_KEY };
+  } else if (forceProvider === 'gemini' && process.env.GEMINI_API_KEY) {
+    activeConfig = { provider: PROVIDERS.gemini, apiKey: process.env.GEMINI_API_KEY };
+  }
 
   // Force OpenRouter fallback if requested (but check if it's exhausted)
   if (forceFallback && process.env.OPENROUTER_API_KEY && !checkOpenRouterDailyLimit()) {
@@ -728,9 +737,22 @@ const makeAIRequest = async (prompt, maxTokens = 1000, taskType = 'general', opt
       if (geminiResult.error) {
         console.error(`Gemini Request Failed: status=${geminiResult.status}, error=${geminiResult.message}`);
 
-        // Handle quota exceeded - mark limit hit
+        // Handle quota exceeded - mark limit hit and try fallback
         if (geminiResult.isQuotaExceeded || geminiResult.status === 429) {
           setGeminiDailyLimitHit();
+
+          // Try Groq as fallback
+          if (process.env.GROQ_API_KEY && !checkGroqDailyLimit()) {
+            console.log('Gemini quota exceeded, falling back to Groq...');
+            return makeAIRequest(prompt, maxTokens, taskType, { forceProvider: 'groq', ...options });
+          }
+
+          // Try OpenRouter as last fallback
+          if (process.env.OPENROUTER_API_KEY && !checkOpenRouterDailyLimit()) {
+            console.log('Gemini quota exceeded, falling back to OpenRouter...');
+            return makeAIRequest(prompt, maxTokens, taskType, { forceProvider: 'openrouter', ...options });
+          }
+
           // All providers exhausted
           throw new Error('ALL_PROVIDERS_EXHAUSTED|Лимиты бесплатных AI-моделей исчерпаны|Рекомендуется перейти на платный тариф');
         }
