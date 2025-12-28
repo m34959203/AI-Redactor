@@ -6,45 +6,48 @@
 // ============ BATCH PROCESSING ============
 export const BATCH_CONFIG = {
   // Maximum articles per batch request
-  // Increased to 4 for OpenRouter (200 req/day, higher throughput)
-  // Groq still limited by 12K TPM, but OpenRouter handles batches better
-  BATCH_SIZE: 4,
+  // Gemini: 250K TPM allows large batches (6 articles × 1500 chars ≈ 2300 tokens)
+  // Processing 6 articles in one request = 6x faster than individual
+  BATCH_SIZE: 6,
 
   // Maximum characters to send per article
-  // 1200 chars (~300 tokens) balances context vs TPM
-  MAX_CHARS_PER_ARTICLE: 1200,
+  // 1500 chars (~375 tokens) - Gemini has plenty of TPM headroom
+  MAX_CHARS_PER_ARTICLE: 1500,
 
-  // Maximum tokens for batch response
-  // Increased to handle 4 articles
-  MAX_TOKENS_BATCH: 1500,
+  // Maximum tokens for batch response (6 articles × 150 tokens each)
+  MAX_TOKENS_BATCH: 1200,
 
   // Maximum tokens for single analysis
-  MAX_TOKENS_SINGLE: 600,
+  MAX_TOKENS_SINGLE: 500,
 
   // Maximum tokens for spelling check
-  MAX_TOKENS_SPELLING: 500
+  MAX_TOKENS_SPELLING: 400,
+
+  // Parallel processing settings
+  PARALLEL_BATCHES: 2,        // Process 2 batches simultaneously
+  PARALLEL_SPELLING: 3        // 3 parallel spell checks
 };
 
 // ============ RATE LIMITING ============
 export const RATE_LIMIT_CONFIG = {
-  // Delay between requests (ms)
-  // Optimized for maximum throughput within limits
-  GROQ_DELAY: 2500,           // 2.5s (12K TPM with ~1500 tokens/req)
-  OPENROUTER_DELAY: 1500,     // 1.5s (20 req/min = 3s, but we use burst capacity)
-  GEMINI_DELAY: 2000,         // 30 RPM = 2s between requests (PRIMARY)
+  // AGGRESSIVE delays for maximum speed (within rate limits)
+  // Gemini: 30 RPM = minimum 2s, but we use 1.2s with burst capacity
+  GEMINI_DELAY: 1200,         // 1.2s - aggressive, uses burst capacity
+  GROQ_DELAY: 2000,           // 2s fallback
+  OPENROUTER_DELAY: 1500,     // 1.5s fallback
 
-  // Delay after hitting rate limit
-  DELAY_AFTER_429: 10000,     // 10s wait on 429 (faster recovery)
+  // Delay after hitting rate limit (quick recovery)
+  DELAY_AFTER_429: 5000,      // 5s wait on 429 (aggressive retry)
 
-  // Delay between spelling checks (minimal for parallel processing)
-  SPELLING_DELAY: 800,        // 0.8s between spell checks (OpenRouter handles well)
+  // Spelling checks - minimal delay for parallel processing
+  SPELLING_DELAY: 500,        // 0.5s between spell checks
 
   // Retry configuration
-  MAX_RETRIES: 3,
-  BACKOFF_MULTIPLIER: 2000,   // 2s backoff base
+  MAX_RETRIES: 2,             // Quick fail, switch provider
+  BACKOFF_MULTIPLIER: 1500,   // 1.5s backoff base
 
   // Minimum delay between ANY requests
-  MIN_DELAY: 300              // 300ms minimum
+  MIN_DELAY: 200              // 200ms minimum (aggressive)
 };
 
 // ============ CACHE ============

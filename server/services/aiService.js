@@ -1053,8 +1053,51 @@ ${content.substring(0, 4000)}
 // ============ BATCH ANALYSIS (MAXIMUM SPEED) ============
 
 /**
+ * Analyze ALL articles with parallel batch processing
+ * Splits into batches and processes them in parallel for maximum speed
+ * @param {Array} articles - Array of {fileName, content}
+ * @returns {Array} - Array of analysis results
+ */
+export const analyzeAllArticles = async (articles) => {
+  if (!articles || articles.length === 0) return [];
+
+  const { BATCH_SIZE, PARALLEL_BATCHES = 2 } = BATCH_CONFIG;
+  const allResults = [];
+
+  // Split all articles into batches
+  const batches = [];
+  for (let i = 0; i < articles.length; i += BATCH_SIZE) {
+    batches.push(articles.slice(i, i + BATCH_SIZE));
+  }
+
+  console.log(`Processing ${articles.length} articles in ${batches.length} batches (${PARALLEL_BATCHES} parallel)`);
+  const startTime = Date.now();
+
+  // Process batches in parallel chunks
+  for (let i = 0; i < batches.length; i += PARALLEL_BATCHES) {
+    const parallelBatches = batches.slice(i, i + PARALLEL_BATCHES);
+
+    // Process this chunk of batches in parallel
+    const batchPromises = parallelBatches.map(batch => analyzeArticlesBatch(batch));
+    const batchResults = await Promise.all(batchPromises);
+
+    // Flatten results
+    for (const results of batchResults) {
+      allResults.push(...results);
+    }
+
+    console.log(`Processed ${Math.min((i + PARALLEL_BATCHES) * BATCH_SIZE, articles.length)}/${articles.length} articles`);
+  }
+
+  const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+  console.log(`All ${articles.length} articles analyzed in ${duration}s (${(articles.length / parseFloat(duration)).toFixed(1)} articles/sec)`);
+
+  return allResults;
+};
+
+/**
  * Analyze multiple articles in one request
- * Up to 5 articles per batch = 20x faster than individual requests
+ * Up to 6 articles per batch for maximum efficiency
  * @param {Array} articles - Array of {fileName, content}
  * @returns {Array} - Array of analysis results
  */
@@ -1516,8 +1559,8 @@ export const checkSpellingBatch = async (articles) => {
 
   console.log(`Batch spelling: ${cachedResults.length} cached, ${uncachedArticles.length} to process`);
 
-  // Process uncached articles in PARALLEL (up to 3 concurrent)
-  const MAX_CONCURRENT = 3;
+  // Process uncached articles in PARALLEL (configurable concurrency)
+  const MAX_CONCURRENT = BATCH_CONFIG.PARALLEL_SPELLING || 3;
   const processedResults = [];
 
   // Split into chunks for parallel processing
@@ -1831,6 +1874,7 @@ export const getPromptVersion = () => ({
 export default {
   analyzeArticle,
   analyzeArticlesBatch,
+  analyzeAllArticles,  // NEW: Parallel batch processing for all articles
   extractMetadata,
   detectSection,
   checkSpelling,
