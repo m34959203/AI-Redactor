@@ -277,10 +277,17 @@ const App = () => {
             spellCheckResults.push(result);
             spellCheckErrors += result.totalErrors;
           } catch (error) {
-            // Если rate limit - прекращаем проверку орфографии
+            // Если rate limit или limit exceeded - прекращаем проверку орфографии
             if (error.message?.includes('Rate limit') || error.message?.includes('429') ||
-                error.message?.startsWith('RATE_LIMIT')) {
+                error.message?.startsWith('RATE_LIMIT') ||
+                error.message?.includes('SPELL_CHECK_LIMIT') ||
+                error.message?.includes('ALL_PROVIDERS_EXHAUSTED')) {
               console.warn('Spell check stopped due to rate limit');
+              // Show banner for limit exhausted
+              if (error.message?.includes('SPELL_CHECK_LIMIT') || error.message?.includes('ALL_PROVIDERS_EXHAUSTED')) {
+                const parts = error.message.split('|');
+                showLimitExhausted(parts[1] || 'Лимит AI исчерпан. Проверка орфографии приостановлена.');
+              }
               break;
             }
             console.warn(`Spell check failed for ${article.file.name}:`, error.message);
@@ -492,7 +499,17 @@ const App = () => {
       showSuccess('Рецензия готова');
     } catch (error) {
       console.error('Review error:', error);
-      showError('Ошибка при создании рецензии');
+
+      // Handle limit exceeded errors - show big banner
+      if (error.message?.includes('REVIEW_LIMIT') ||
+          error.message?.includes('ALL_PROVIDERS_EXHAUSTED') ||
+          error.message?.includes('RATE_LIMIT')) {
+        const parts = error.message.split('|');
+        const message = parts[1] || 'Лимит AI исчерпан. Попробуйте позже.';
+        showLimitExhausted(message);
+      } else {
+        showError('Ошибка при создании рецензии: ' + error.message);
+      }
     } finally {
       setProcessing(false);
     }
@@ -511,7 +528,17 @@ const App = () => {
       }
     } catch (error) {
       console.error('Spell check error:', error);
-      showError('Ошибка при проверке орфографии: ' + error.message);
+
+      // Handle limit exceeded errors - show big banner
+      if (error.message?.includes('SPELL_CHECK_LIMIT') ||
+          error.message?.includes('ALL_PROVIDERS_EXHAUSTED') ||
+          error.message?.includes('RATE_LIMIT')) {
+        const parts = error.message.split('|');
+        const message = parts[1] || 'Лимит AI исчерпан. Попробуйте позже.';
+        showLimitExhausted(message);
+      } else {
+        showError('Ошибка при проверке орфографии: ' + error.message);
+      }
     } finally {
       setProcessing(false);
     }

@@ -1487,10 +1487,8 @@ const filterSpellingErrors = (errors) => {
 
 /**
  * Check spelling for a single article
- * Strategy:
- * - Gemini (250K TPM): Full article in ONE request
- * - Groq (12K TPM): Sample first 4000 chars (intro + methodology) - ONE request
- * This avoids multiple requests that exhaust rate limits quickly
+ * ALWAYS checks 100% of article content - no sampling or truncation
+ * If provider limits don't allow full check, throws error with message
  */
 export const checkSpelling = async (content, fileName) => {
   // Check cache first
@@ -1500,18 +1498,10 @@ export const checkSpelling = async (content, fileName) => {
 
   const fallback = { errors: [], totalErrors: 0 };
 
-  // Determine content strategy based on available provider
-  // Gemini: 250K TPM = full article in one request
-  // Groq: 12K TPM = sample first 4000 chars (saves tokens, one request)
-  const geminiAvailable = process.env.GEMINI_API_KEY && !checkGeminiDailyLimit();
+  // ALWAYS use full content - 100% analysis required
+  const textToCheck = content;
 
-  // For Groq: 4000 chars ≈ 1000 tokens + 500 token prompt = 1500 tokens per request
-  // This allows ~8 spell checks per minute on Groq (12K TPM / 1.5K = 8)
-  const maxChars = geminiAvailable ? content.length : 4000;
-  const textToCheck = content.substring(0, maxChars);
-  const coverage = Math.round((textToCheck.length / content.length) * 100);
-
-  console.log(`Spell check "${fileName}": ${textToCheck.length}/${content.length} chars (${coverage}%), provider=${geminiAvailable ? 'Gemini' : 'Groq'}`);
+  console.log(`Spell check "${fileName}": ${content.length} chars (100%), requesting full analysis`);
 
   const prompt = `## ЗАДАЧА
 Найди ТОЛЬКО реальные орфографические ОШИБКИ в тексте.
@@ -1537,7 +1527,7 @@ export const checkSpelling = async (content, fileName) => {
 
 Если ошибок нет: {"errors": [], "totalErrors": 0}
 
-## ТЕКСТ:
+## ТЕКСТ (полный, ${content.length} символов):
 ${textToCheck}`;
 
   try {
@@ -1549,7 +1539,7 @@ ${textToCheck}`;
     const spellingResult = {
       errors: validErrors,
       totalErrors: validErrors.length,
-      coverage // Add coverage info so UI can show it
+      coverage: 100 // Always 100%
     };
 
     // Cache the result
@@ -1558,6 +1548,15 @@ ${textToCheck}`;
     return { fileName, ...spellingResult };
   } catch (error) {
     console.error(`Spell check error for "${fileName}":`, error.message);
+
+    // Re-throw rate limit errors so UI can show proper message
+    if (error.message?.includes('ALL_PROVIDERS_EXHAUSTED') ||
+        error.message?.includes('RATE_LIMIT') ||
+        error.message?.includes('413') ||
+        error.message?.includes('too large')) {
+      throw new Error(`SPELL_CHECK_LIMIT|Не удалось проверить орфографию "${fileName}" - превышен лимит AI. Попробуйте позже или обновите тариф.`);
+    }
+
     return { fileName, ...fallback };
   }
 };
@@ -1627,17 +1626,14 @@ const processSpellingArticle = async (article) => {
 
 /**
  * Review article
- * Smart content sizing: full content for Gemini, limited for Groq
+ * ALWAYS reviews 100% of article content - no sampling or truncation
+ * If provider limits don't allow full review, throws error with message
  */
 export const reviewArticle = async (content, fileName) => {
-  // Determine content limit based on available provider
-  // Groq: 12K TPM = ~6000 chars for content (with prompt overhead)
-  // Gemini: 250K TPM = can handle full article
-  const geminiAvailable = process.env.GEMINI_API_KEY && !checkGeminiDailyLimit();
-  const maxChars = geminiAvailable ? content.length : 8000; // Groq: 8000 chars to stay under 12K TPM
-  const textToReview = content.substring(0, maxChars);
+  // ALWAYS use full content - 100% analysis required
+  const textToReview = content;
 
-  console.log(`Review "${fileName}": ${content.length} chars, using ${textToReview.length} chars, provider=${geminiAvailable ? 'Gemini' : 'Groq'}`);
+  console.log(`Review "${fileName}": ${content.length} chars (100%), requesting full analysis`);
 
   const prompt = `Проведи рецензию научной статьи.
 
@@ -1694,10 +1690,20 @@ ${textToReview}
       relevance: { score: clampScore(review.relevance?.score), comment: review.relevance?.comment || '' },
       overallScore: clampScore(review.overallScore),
       summary: review.summary || fallback.summary,
-      recommendations: Array.isArray(review.recommendations) ? review.recommendations.filter(r => r && typeof r === 'string') : []
+      recommendations: Array.isArray(review.recommendations) ? review.recommendations.filter(r => r && typeof r === 'string') : [],
+      coverage: 100 // Always 100%
     };
   } catch (error) {
-    console.error('Review error:', error);
+    console.error(`Review error for "${fileName}":`, error.message);
+
+    // Re-throw rate limit errors so UI can show proper message
+    if (error.message?.includes('ALL_PROVIDERS_EXHAUSTED') ||
+        error.message?.includes('RATE_LIMIT') ||
+        error.message?.includes('413') ||
+        error.message?.includes('too large')) {
+      throw new Error(`REVIEW_LIMIT|Не удалось создать рецензию "${fileName}" - превышен лимит AI. Попробуйте позже или обновите тариф.`);
+    }
+
     return { fileName, ...fallback };
   }
 };
