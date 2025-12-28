@@ -77,10 +77,11 @@ export const PROVIDERS = {
     name: 'OpenRouter',
     url: 'https://openrouter.ai/api/v1/chat/completions',
     model: 'tngtech/deepseek-r1t2-chimera:free',
+    // Updated Dec 2025 - only working free models
     fallbackModels: [
-      'google/gemma-2-9b-it:free',
-      'meta-llama/llama-3.1-8b-instruct:free',
-      'qwen/qwen-2.5-7b-instruct:free'
+      'deepseek/deepseek-chat:free',
+      'meta-llama/llama-3.3-70b-instruct:free',
+      'mistralai/mistral-7b-instruct:free'
     ],
     keyEnv: 'OPENROUTER_API_KEY',
     rateLimit: { requestsPerMin: 20, requestsPerDay: 200 },
