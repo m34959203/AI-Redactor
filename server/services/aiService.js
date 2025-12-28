@@ -1473,8 +1473,9 @@ export const checkSpelling = async (content, fileName) => {
   const cached = getCached(cacheKey);
   if (cached) return { fileName, ...cached };
 
-  // Reduced from 4000 to 2000 chars to minimize token usage
-  const textToCheck = content.substring(0, 2000);
+  // Increased to 6000 chars for better coverage (~40-50% of typical article)
+  // Gemini has 250K TPM - plenty of headroom for thorough spell checking
+  const textToCheck = content.substring(0, 6000);
 
   const prompt = `## ЗАДАЧА
 Найди ТОЛЬКО реальные орфографические ОШИБКИ в тексте.
@@ -1510,11 +1511,9 @@ ${textToCheck}`;
     // Use configured token limit for spelling to conserve TPM
     const maxTokens = BATCH_CONFIG.MAX_TOKENS_SPELLING || 500;
 
-    // CRITICAL: Use OpenRouter for spelling when available
-    // Groq has only 6K TPM for 8B model, causing constant 429 errors
-    // OpenRouter has 200 req/day which is enough for spell checking
-    const useOpenRouter = !!process.env.OPENROUTER_API_KEY;
-    const response = await makeAIRequest(prompt, maxTokens, 'spelling', { forceFallback: useOpenRouter });
+    // Gemini is now primary with 250K TPM - plenty for spelling
+    // No need to force fallback anymore
+    const response = await makeAIRequest(prompt, maxTokens, 'spelling');
     const result = safeJsonParse(response, fallback);
 
     const validErrors = filterSpellingErrors(result.errors);
