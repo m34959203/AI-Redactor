@@ -479,6 +479,55 @@ const detectSectionFromContent = (content, title = '') => {
   return { section: null, confidence: 0 };
 };
 
+/**
+ * Extract author from article content using regex patterns
+ * @param {string} content - Article content
+ * @returns {string|null} - Extracted author or null
+ */
+const extractAuthorFromContent = (content) => {
+  if (!content) return null;
+
+  // Take first 3000 chars where author is usually located
+  const text = content.substring(0, 3000);
+
+  // Patterns for author extraction (ordered by reliability)
+  const patterns = [
+    // "Автор: Иванов А.Б." or "Author: Ivanov A.B."
+    /(?:автор|author|авторы|authors)[\s:]+([А-ЯЁӘҒҚҢӨҮІа-яёәғқңөүіA-Za-z]+\s+[А-ЯЁӘҒҚҢӨҮІа-яёәғқңөүіA-Za-z]\.[А-ЯЁӘҒҚҢӨҮІа-яёәғқңөүіA-Za-z]?\.?)/i,
+
+    // After UDK/УДК: Title \n Author (common format)
+    /(?:УДК|UDC|ӘОЖ)[\s\d.]+[^\n]+\n+([А-ЯЁӘҒҚҢӨҮІа-яёәғқңөүі][а-яёәғқңөүі]+\s+[А-ЯЁӘҒҚҢӨҮІа-яёәғқңөүі]\.[А-ЯЁӘҒҚҢӨҮІа-яёәғқңөүі]?\.?)/i,
+
+    // "Фамилия И.О." pattern with affiliation (university, etc.)
+    /([А-ЯЁӘҒҚҢӨҮІа-яёәғқңөүі][а-яёәғқңөүі]+\s+[А-ЯЁӘҒҚҢӨҮІ]\.[А-ЯЁӘҒҚҢӨҮІ]?\.?)[\s,]*(?:магистр|докторант|профессор|доцент|к\.\s*[а-я]+\.\s*н|PhD|университет|институт|академия)/i,
+
+    // "И.О. Фамилия" pattern
+    /([А-ЯЁӘҒҚҢӨҮІ]\.[А-ЯЁӘҒҚҢӨҮІ]?\.?\s+[А-ЯЁӘҒҚҢӨҮІа-яёәғқңөүі][а-яёәғқңөүі]+)[\s,]*(?:магистр|докторант|профессор|доцент|к\.\s*[а-я]+\.\s*н|PhD|университет)/i,
+
+    // Simple "Фамилия И.О." anywhere
+    /\b([А-ЯЁӘҒҚҢӨҮІа-яёәғқңөүі][а-яёәғқңөүі]{2,}\s+[А-ЯЁӘҒҚҢӨҮІ]\.[А-ЯЁӘҒҚҢӨҮІ]?\.?)\b/,
+
+    // Full name "Фамилия Имя Отчество" before annotation
+    /([А-ЯЁӘҒҚҢӨҮІа-яёәғқңөүі][а-яёәғқңөүі]+\s+[А-ЯЁӘҒҚҢӨҮІа-яёәғқңөүі][а-яёәғқңөүі]+\s+[А-ЯЁӘҒҚҢӨҮІа-яёәғқңөүі][а-яёәғқңөүі]+)[\s,]*(?:аннотация|abstract|annotation|түйін)/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match && match[1]) {
+      const author = match[1].trim();
+      // Validate: should be 2-50 chars and not look like a title
+      if (author.length >= 2 && author.length <= 50 &&
+          !author.toUpperCase().includes('УДК') &&
+          !author.toUpperCase().includes('НАУК') &&
+          !author.match(/^\d/)) {
+        return author;
+      }
+    }
+  }
+
+  return null;
+};
+
 // ============ JSON PARSING ============
 
 const extractJsonFromResponse = (response) => {
@@ -1165,17 +1214,24 @@ ${articlesText}
         !author.trim();
 
       if (isInvalidAuthor) {
-        // Try to extract author from filename (e.g., "Қайрат Е.Қ..docx" -> "Қайрат Е.Қ.")
-        const fileNameWithoutExt = article.fileName.replace(/\.docx$/i, '').trim();
-        // Check if filename looks like a name (contains initials or short patterns)
-        const looksLikeName = /[А-ЯЁӘҒҚҢӨҮІа-яёәғқңөүі]\.\s*[А-ЯЁӘҒҚҢӨҮІа-яёәғқңөүі]\.?/i.test(fileNameWithoutExt) ||
-          /^[А-ЯЁӘҒҚҢӨҮІа-яёәғқңөүі]+\s+[А-ЯЁӘҒҚҢӨҮІа-яёәғқңөүі]/i.test(fileNameWithoutExt);
-
-        if (looksLikeName && fileNameWithoutExt.length < 50) {
-          author = fileNameWithoutExt;
-          console.log(`Extracted author from filename: "${article.fileName}" -> "${author}"`);
+        // FALLBACK 1: Try to extract author from article content using regex patterns
+        const contentAuthor = extractAuthorFromContent(article.content);
+        if (contentAuthor) {
+          author = contentAuthor;
+          console.log(`Extracted author from content: "${article.fileName}" -> "${author}"`);
         } else {
-          author = 'Автор не указан';
+          // FALLBACK 2: Try to extract from filename (e.g., "Қайрат Е.Қ..docx")
+          const fileNameWithoutExt = article.fileName.replace(/\.docx$/i, '').trim();
+          const looksLikeName = /[А-ЯЁӘҒҚҢӨҮІа-яёәғқңөүі]\.\s*[А-ЯЁӘҒҚҢӨҮІа-яёәғқңөүі]\.?/i.test(fileNameWithoutExt) ||
+            /^[А-ЯЁӘҒҚҢӨҮІа-яёәғқңөүі]+\s+[А-ЯЁӘҒҚҢӨҮІа-яёәғқңөүі]/i.test(fileNameWithoutExt);
+
+          if (looksLikeName && fileNameWithoutExt.length < 50) {
+            author = fileNameWithoutExt;
+            console.log(`Extracted author from filename: "${article.fileName}" -> "${author}"`);
+          } else {
+            author = 'Автор не указан';
+            console.log(`Could not extract author for: "${article.fileName}"`);
+          }
         }
       }
       author = author.trim().replace(/,\s*$/, '').replace(/\s+/g, ' ');
