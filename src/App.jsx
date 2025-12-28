@@ -5,6 +5,7 @@ import LoadingOverlay from './components/UI/LoadingOverlay';
 import ToastContainer from './components/UI/Toast';
 import Onboarding from './components/UI/Onboarding';
 import ConfirmDialog from './components/UI/ConfirmDialog';
+import LimitExhaustedBanner from './components/UI/LimitExhaustedBanner';
 import EditorTab from './components/Editor/EditorTab';
 import SpellCheckTab from './components/SpellCheck/SpellCheckTab';
 import ReviewTab from './components/Review/ReviewTab';
@@ -59,6 +60,20 @@ const App = () => {
     variant: 'danger',
     onConfirm: () => {},
   });
+
+  // Limit exhausted banner state
+  const [limitExhausted, setLimitExhausted] = useState({
+    isVisible: false,
+    message: ''
+  });
+
+  const showLimitExhausted = (message) => {
+    setLimitExhausted({ isVisible: true, message });
+  };
+
+  const hideLimitExhausted = () => {
+    setLimitExhausted({ isVisible: false, message: '' });
+  };
 
   const showConfirm = ({ title, message, confirmText = 'Удалить', variant = 'danger', onConfirm }) => {
     setConfirmDialog({ isOpen: true, title, message, confirmText, variant, onConfirm });
@@ -206,8 +221,13 @@ const App = () => {
         } catch (error) {
           console.error('Batch analysis error:', error);
 
+          // Check for all providers exhausted - show big banner
+          if (error.message?.includes('ALL_PROVIDERS_EXHAUSTED')) {
+            aiAvailable = false;
+            showLimitExhausted('Дневной лимит всех бесплатных AI-моделей (Gemini, Groq, OpenRouter) исчерпан. Подождите или обновите тариф.');
+          }
           // Check for rate limit
-          if (error.message?.includes('RATE_LIMIT') || error.message?.includes('429')) {
+          else if (error.message?.includes('RATE_LIMIT') || error.message?.includes('429')) {
             aiAvailable = false;
             showError('Сервер занят. Используем быстрый режим обработки.');
           }
@@ -257,10 +277,17 @@ const App = () => {
             spellCheckResults.push(result);
             spellCheckErrors += result.totalErrors;
           } catch (error) {
-            // Если rate limit - прекращаем проверку орфографии
+            // Если rate limit или limit exceeded - прекращаем проверку орфографии
             if (error.message?.includes('Rate limit') || error.message?.includes('429') ||
-                error.message?.startsWith('RATE_LIMIT')) {
+                error.message?.startsWith('RATE_LIMIT') ||
+                error.message?.includes('SPELL_CHECK_LIMIT') ||
+                error.message?.includes('ALL_PROVIDERS_EXHAUSTED')) {
               console.warn('Spell check stopped due to rate limit');
+              // Show banner for limit exhausted
+              if (error.message?.includes('SPELL_CHECK_LIMIT') || error.message?.includes('ALL_PROVIDERS_EXHAUSTED')) {
+                const parts = error.message.split('|');
+                showLimitExhausted(parts[1] || 'Лимит AI исчерпан. Проверка орфографии приостановлена.');
+              }
               break;
             }
             console.warn(`Spell check failed for ${article.file.name}:`, error.message);
@@ -472,7 +499,17 @@ const App = () => {
       showSuccess('Рецензия готова');
     } catch (error) {
       console.error('Review error:', error);
-      showError('Ошибка при создании рецензии');
+
+      // Handle limit exceeded errors - show big banner
+      if (error.message?.includes('REVIEW_LIMIT') ||
+          error.message?.includes('ALL_PROVIDERS_EXHAUSTED') ||
+          error.message?.includes('RATE_LIMIT')) {
+        const parts = error.message.split('|');
+        const message = parts[1] || 'Лимит AI исчерпан. Попробуйте позже.';
+        showLimitExhausted(message);
+      } else {
+        showError('Ошибка при создании рецензии: ' + error.message);
+      }
     } finally {
       setProcessing(false);
     }
@@ -491,7 +528,17 @@ const App = () => {
       }
     } catch (error) {
       console.error('Spell check error:', error);
-      showError('Ошибка при проверке орфографии: ' + error.message);
+
+      // Handle limit exceeded errors - show big banner
+      if (error.message?.includes('SPELL_CHECK_LIMIT') ||
+          error.message?.includes('ALL_PROVIDERS_EXHAUSTED') ||
+          error.message?.includes('RATE_LIMIT')) {
+        const parts = error.message.split('|');
+        const message = parts[1] || 'Лимит AI исчерпан. Попробуйте позже.';
+        showLimitExhausted(message);
+      } else {
+        showError('Ошибка при проверке орфографии: ' + error.message);
+      }
     } finally {
       setProcessing(false);
     }
@@ -698,6 +745,13 @@ const App = () => {
         message={confirmDialog.message}
         confirmText={confirmDialog.confirmText}
         variant={confirmDialog.variant}
+      />
+
+      {/* Limit Exhausted Banner */}
+      <LimitExhaustedBanner
+        isVisible={limitExhausted.isVisible}
+        onDismiss={hideLimitExhausted}
+        message={limitExhausted.message}
       />
     </div>
   );

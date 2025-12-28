@@ -679,7 +679,7 @@ const makeGeminiRequest = async (prompt, maxTokens, apiKey, model) => {
 // ============ CORE AI REQUEST ============
 
 const makeAIRequest = async (prompt, maxTokens = 1000, taskType = 'general', options = {}) => {
-  const { forceFallback = false, forceGemini = false, retryCount = 0, modelIndex = 0 } = options;
+  const { forceFallback = false, forceGemini = false, forceProvider = null, retryCount = 0, modelIndex = 0 } = options;
 
   // Check if all providers are exhausted BEFORE making request
   if (areAllProvidersExhausted()) {
@@ -689,6 +689,15 @@ const makeAIRequest = async (prompt, maxTokens = 1000, taskType = 'general', opt
 
   // Get provider
   let activeConfig = getActiveProvider();
+
+  // Force specific provider if requested
+  if (forceProvider === 'groq' && process.env.GROQ_API_KEY) {
+    activeConfig = { provider: PROVIDERS.groq, apiKey: process.env.GROQ_API_KEY };
+  } else if (forceProvider === 'openrouter' && process.env.OPENROUTER_API_KEY) {
+    activeConfig = { provider: PROVIDERS.openrouter, apiKey: process.env.OPENROUTER_API_KEY };
+  } else if (forceProvider === 'gemini' && process.env.GEMINI_API_KEY) {
+    activeConfig = { provider: PROVIDERS.gemini, apiKey: process.env.GEMINI_API_KEY };
+  }
 
   // Force OpenRouter fallback if requested (but check if it's exhausted)
   if (forceFallback && process.env.OPENROUTER_API_KEY && !checkOpenRouterDailyLimit()) {
@@ -728,9 +737,22 @@ const makeAIRequest = async (prompt, maxTokens = 1000, taskType = 'general', opt
       if (geminiResult.error) {
         console.error(`Gemini Request Failed: status=${geminiResult.status}, error=${geminiResult.message}`);
 
-        // Handle quota exceeded - mark limit hit
+        // Handle quota exceeded - mark limit hit and try fallback
         if (geminiResult.isQuotaExceeded || geminiResult.status === 429) {
           setGeminiDailyLimitHit();
+
+          // Try Groq as fallback
+          if (process.env.GROQ_API_KEY && !checkGroqDailyLimit()) {
+            console.log('Gemini quota exceeded, falling back to Groq...');
+            return makeAIRequest(prompt, maxTokens, taskType, { forceProvider: 'groq', ...options });
+          }
+
+          // Try OpenRouter as last fallback
+          if (process.env.OPENROUTER_API_KEY && !checkOpenRouterDailyLimit()) {
+            console.log('Gemini quota exceeded, falling back to OpenRouter...');
+            return makeAIRequest(prompt, maxTokens, taskType, { forceProvider: 'openrouter', ...options });
+          }
+
           // All providers exhausted
           throw new Error('ALL_PROVIDERS_EXHAUSTED|Лимиты бесплатных AI-моделей исчерпаны|Рекомендуется перейти на платный тариф');
         }
@@ -1437,9 +1459,88 @@ const KAZAKH_PATTERN = /[ӘәҒғҚқҢңӨөҰұҮүҺһІі]/;
 const KAZAKH_WORDS = /^(сауаттылық|білім|оқыту|мектеп|тіл|және|бойынша|туралы|арқылы|жүйесі|дамуы|қазақ|орыс|математикалық|жағдайда|сабақ|оқушы|мұғалім|әдіс|тәсіл|ұйым|жұмыс|бағдарлама|ғылым|тарих|мәдениет|қоғам|мемлекет|заң|құқық|денсаулық|спорт|өнер|музыка)$/i;
 
 /**
- * Filter out false positive spelling errors
+ * Detect primary language of text
+ * @returns {'kazakh' | 'russian' | 'english' | 'mixed'}
  */
-const filterSpellingErrors = (errors) => {
+const detectTextLanguage = (text) => {
+  if (!text) return 'mixed';
+
+  const sample = text.substring(0, 3000);
+
+  // Count Kazakh-specific characters
+  const kazakhChars = (sample.match(/[ӘәҒғҚқҢңӨөҰұҮүІі]/g) || []).length;
+
+  // Count Cyrillic characters (Russian + Kazakh common)
+  const cyrillicChars = (sample.match(/[а-яёА-ЯЁ]/g) || []).length;
+
+  // Count Latin characters
+  const latinChars = (sample.match(/[a-zA-Z]/g) || []).length;
+
+  const totalChars = kazakhChars + cyrillicChars + latinChars;
+  if (totalChars === 0) return 'mixed';
+
+  // If significant Kazakh-specific characters, it's Kazakh
+  if (kazakhChars > 10 || kazakhChars / totalChars > 0.02) {
+    return 'kazakh';
+  }
+
+  // If mostly Cyrillic, it's Russian
+  if (cyrillicChars > latinChars * 2) {
+    return 'russian';
+  }
+
+  // If mostly Latin, it's English
+  if (latinChars > cyrillicChars * 2) {
+    return 'english';
+  }
+
+  return 'mixed';
+};
+
+// Known synonym pairs that are NOT spelling errors
+const SYNONYM_PAIRS = [
+  ['disperse', 'deflect'], ['decrease', 'reduction'], ['especially', 'particularly'],
+  ['increase', 'growth'], ['important', 'significant'], ['use', 'utilize'],
+  ['show', 'demonstrate'], ['help', 'assist'], ['big', 'large'], ['small', 'little'],
+  ['start', 'begin'], ['end', 'finish'], ['make', 'create'], ['get', 'obtain'],
+  ['give', 'provide'], ['take', 'receive'], ['also', 'additionally'], ['but', 'however'],
+  ['экологический', 'экологически'], ['чистый', 'чистой']
+];
+
+/**
+ * Calculate similarity ratio between two strings (0-1)
+ * Typos should have high similarity (>0.5), synonyms have low similarity
+ */
+const calculateSimilarity = (str1, str2) => {
+  const s1 = str1.toLowerCase();
+  const s2 = str2.toLowerCase();
+
+  if (s1 === s2) return 1;
+  if (s1.length === 0 || s2.length === 0) return 0;
+
+  // Simple character overlap ratio
+  const chars1 = new Set(s1.split(''));
+  const chars2 = new Set(s2.split(''));
+  const intersection = [...chars1].filter(c => chars2.has(c)).length;
+  const union = new Set([...chars1, ...chars2]).size;
+
+  const charSimilarity = intersection / union;
+
+  // Length similarity
+  const lengthDiff = Math.abs(s1.length - s2.length);
+  const maxLength = Math.max(s1.length, s2.length);
+  const lengthSimilarity = 1 - (lengthDiff / maxLength);
+
+  // Combined similarity
+  return (charSimilarity * 0.6 + lengthSimilarity * 0.4);
+};
+
+/**
+ * Filter out false positive spelling errors
+ * @param {Array} errors - Array of spelling errors
+ * @param {boolean} isKazakhMode - If true, allow Kazakh words through (Gemini handles them)
+ */
+const filterSpellingErrors = (errors, isKazakhMode = false) => {
   if (!Array.isArray(errors)) return [];
 
   return errors.filter(err => {
@@ -1453,11 +1554,35 @@ const filterSpellingErrors = (errors) => {
     const normalizedSuggestion = suggestion.toLowerCase().normalize('NFC');
     if (normalizedWord === normalizedSuggestion) return false;
 
-    // Filter out Kazakh words (containing Kazakh-specific characters)
-    if (KAZAKH_PATTERN.test(word) || KAZAKH_PATTERN.test(suggestion)) return false;
+    // In Kazakh mode, allow Kazakh words through (Gemini checked them)
+    // In non-Kazakh mode, filter out Kazakh words (they weren't checked properly)
+    if (!isKazakhMode) {
+      if (KAZAKH_PATTERN.test(word) || KAZAKH_PATTERN.test(suggestion)) return false;
+      if (KAZAKH_WORDS.test(word)) return false;
+    }
 
-    // Filter out common Kazakh words even without special characters
-    if (KAZAKH_WORDS.test(word)) return false;
+    // Filter out known synonym pairs (applies to all languages)
+    for (const [syn1, syn2] of SYNONYM_PAIRS) {
+      if ((normalizedWord.includes(syn1) && normalizedSuggestion.includes(syn2)) ||
+          (normalizedWord.includes(syn2) && normalizedSuggestion.includes(syn1))) {
+        console.log(`Filtered synonym pair: "${word}" -> "${suggestion}"`);
+        return false;
+      }
+    }
+
+    // Filter out suggestions that are completely different words (synonyms)
+    // Real typos should have similarity > 0.4
+    const similarity = calculateSimilarity(word, suggestion);
+    if (similarity < 0.4) {
+      console.log(`Filtered low-similarity suggestion (${similarity.toFixed(2)}): "${word}" -> "${suggestion}"`);
+      return false;
+    }
+
+    // Filter out multi-word suggestions (like "экологически" -> "экологически чистой")
+    if (suggestion.split(/\s+/).length > word.split(/\s+/).length + 1) {
+      console.log(`Filtered multi-word addition: "${word}" -> "${suggestion}"`);
+      return false;
+    }
 
     return true;
   });
@@ -1465,7 +1590,9 @@ const filterSpellingErrors = (errors) => {
 
 /**
  * Check spelling for a single article
- * Smart chunking: uses full content for Gemini, chunks for Groq (12K TPM limit)
+ * ALWAYS checks 100% of article content - no sampling or truncation
+ * Supports: Russian, English, Kazakh (Kazakh uses Gemini preferentially)
+ * If provider limits don't allow full check, throws error with message
  */
 export const checkSpelling = async (content, fileName) => {
   // Check cache first
@@ -1475,73 +1602,127 @@ export const checkSpelling = async (content, fileName) => {
 
   const fallback = { errors: [], totalErrors: 0 };
 
-  // Determine max content size based on available provider
-  // Groq: 12K TPM = ~6000 chars (with prompt overhead ~3000 tokens)
-  // Gemini: 250K TPM = unlimited for typical articles
-  const geminiAvailable = process.env.GEMINI_API_KEY && !checkGeminiDailyLimit();
-  const maxCharsPerChunk = geminiAvailable ? 50000 : 6000; // Gemini can handle full article
+  // Detect language
+  const language = detectTextLanguage(content);
+  const isKazakh = language === 'kazakh';
 
-  // Split content into chunks if needed
-  const chunks = [];
-  for (let i = 0; i < content.length; i += maxCharsPerChunk) {
-    chunks.push(content.substring(i, i + maxCharsPerChunk));
-  }
+  // ALWAYS use full content - 100% analysis required
+  const textToCheck = content;
 
-  console.log(`Spell check "${fileName}": ${content.length} chars, ${chunks.length} chunk(s), provider=${geminiAvailable ? 'Gemini' : 'Groq'}`);
+  console.log(`Spell check "${fileName}": ${content.length} chars (100%), language=${language}, requesting full analysis`);
 
-  const allErrors = [];
+  // Build language-specific prompt
+  let prompt;
 
-  for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex++) {
-    const textToCheck = chunks[chunkIndex];
+  if (isKazakh) {
+    // Kazakh-specific prompt (uses Gemini which has better Kazakh support)
+    prompt = `## ТАПСЫРМА / ЗАДАЧА
+Қазақ, орыс және ағылшын тілдеріндегі ОРФОГРАФИЯЛЫҚ ҚАТЕЛЕРДІ (қате жазылған сөздер) тап.
+Найди ОРФОГРАФИЧЕСКИЕ ОШИБКИ в тексте на казахском, русском и английском языках.
 
-    const prompt = `## ЗАДАЧА
-Найди ТОЛЬКО реальные орфографические ОШИБКИ в тексте.
+## ОРФОГРАФИЯЛЫҚ ҚАТЕ ДЕГЕНІМІЗ / ЧТО ЯВЛЯЕТСЯ ОШИБКОЙ:
+- Қате әріп: "білім" емес "білім" дұрыс жазылған / Неправильная буква
+- Артық әріп: лишняя буква
+- Жетіспейтін әріп: пропущенная буква
+- Қазақ тіліндегі ерекше әріптер: Ә, Ғ, Қ, Ң, Ө, Ұ, Ү, І — дұрыс қолдануын тексер
 
-## КРИТИЧНО - ИГНОРИРУЙ:
-- ВСЕ казахские слова (с буквами Ә, Ғ, Қ, Ң, Ө, Ұ, Ү, Һ, І)
-- Казахские слова без специальных букв (сауаттылық, білім, оқыту, мектеп, тіл, және т.д.)
-- Термины, имена, аббревиатуры
-- Слова из названий и заголовков
+## ҚАТЕ ЕМЕС / НЕ ЯВЛЯЕТСЯ ОШИБКОЙ:
+❌ Синонимдер / Синонимы — разные слова с похожим значением
+❌ Стилистика — замена одного правильного слова другим
+❌ Грамматика — падежи, согласование
+❌ Есімдер, терминдер / Имена, термины, аббревиатуры
 
-## ПРАВИЛА:
-1. word и suggestion ДОЛЖНЫ быть РАЗНЫМИ!
-2. Если не уверен что это ошибка — НЕ ДОБАВЛЯЙ
-3. Проверяй только РУССКИЙ и АНГЛИЙСКИЙ текст
+## МЫСАЛДАР / ПРИМЕРЫ:
+✅ ҚАТЕ: {"word": "билім", "suggestion": "білім"} — қате әріп
+✅ ҚАТЕ: {"word": "эксперемент", "suggestion": "эксперимент"} — пропущена буква
+❌ ҚАТЕ ЕМЕС: синонимдерді ауыстыру
+
+## ЖАУАП ФОРМАТЫ / ФОРМАТ ОТВЕТА:
+{"errors": [{"word": "қате_сөз", "suggestion": "дұрыс_сөз", "context": "..."}], "totalErrors": N}
+
+Қате жоқ болса / Если ошибок нет: {"errors": [], "totalErrors": 0}
+
+## МӘТІН / ТЕКСТ:
+${textToCheck}`;
+  } else {
+    // Russian/English prompt
+    prompt = `## ЗАДАЧА
+Найди ТОЛЬКО ОРФОГРАФИЧЕСКИЕ ОШИБКИ (опечатки, неправильное написание букв).
+
+## ЧТО ЯВЛЯЕТСЯ ОРФОГРАФИЧЕСКОЙ ОШИБКОЙ:
+- Пропущенная буква: "эксперемент" → "эксперимент"
+- Лишняя буква: "расчёт" написано "рассчёт"
+- Неправильная буква: "обьект" → "объект", "прецендент" → "прецедент"
+- Перепутанные буквы: "колличество" → "количество"
+
+## ЧТО НЕ ЯВЛЯЕТСЯ ОРФОГРАФИЧЕСКОЙ ОШИБКОЙ (ИГНОРИРУЙ!):
+❌ СИНОНИМЫ: disperse/deflect, decrease/reduction, especially/particularly — это РАЗНЫЕ слова, НЕ ошибки!
+❌ СТИЛИСТИКА: замена одного правильного слова другим правильным
+❌ ГРАММАТИКА: падежи, согласование, времена глаголов
+❌ ДОБАВЛЕНИЕ СЛОВ: "экологически" → "экологически чистой" — НЕ ошибка!
+❌ ТЕРМИНЫ, ИМЕНА, АББРЕВИАТУРЫ
+
+## КРИТЕРИЙ ПРОВЕРКИ:
+Ошибка = слово написано с НЕПРАВИЛЬНЫМИ БУКВАМИ (опечатка).
+НЕ ошибка = правильно написанное слово, которое можно заменить синонимом.
 
 ## ПРИМЕРЫ:
-✅ ВЕРНО: {"word": "эксперемент", "suggestion": "эксперимент"}
-✅ ВЕРНО: {"word": "обьект", "suggestion": "объект"}
-❌ НЕВЕРНО: {"word": "сауаттылық", "suggestion": "сауаттылық"} — это казахское слово!
+✅ ОШИБКА: {"word": "эксперемент", "suggestion": "эксперимент"} — пропущена буква "и"
+✅ ОШИБКА: {"word": "обьект", "suggestion": "объект"} — неправильный мягкий знак
+✅ ОШИБКА: {"word": "колличество", "suggestion": "количество"} — лишняя "л"
+❌ НЕ ОШИБКА: {"word": "disperse", "suggestion": "deflect"} — это разные слова!
+❌ НЕ ОШИБКА: {"word": "decrease", "suggestion": "reduction"} — это синонимы!
+❌ НЕ ОШИБКА: {"word": "especially", "suggestion": "particularly"} — оба слова правильные!
 
 ## ФОРМАТ ОТВЕТА:
-{"errors": [{"word": "ошибка", "suggestion": "правильно", "context": "..."}], "totalErrors": N}
+{"errors": [{"word": "слово_с_опечаткой", "suggestion": "правильное_написание", "context": "...фрагмент текста..."}], "totalErrors": N}
 
-Если ошибок нет: {"errors": [], "totalErrors": 0}
+Если орфографических ошибок нет: {"errors": [], "totalErrors": 0}
 
-## ТЕКСТ (часть ${chunkIndex + 1}/${chunks.length}):
+## ТЕКСТ:
 ${textToCheck}`;
-
-    try {
-      const maxTokens = BATCH_CONFIG.MAX_TOKENS_SPELLING || 1500;
-      const response = await makeAIRequest(prompt, maxTokens, 'spelling');
-      const result = safeJsonParse(response, fallback);
-
-      if (result.errors && Array.isArray(result.errors)) {
-        allErrors.push(...result.errors);
-      }
-    } catch (error) {
-      console.error(`Spell check chunk ${chunkIndex + 1} error:`, error.message);
-      // Continue with other chunks even if one fails
-    }
   }
 
-  const validErrors = filterSpellingErrors(allErrors);
-  const spellingResult = { errors: validErrors, totalErrors: validErrors.length };
+  try {
+    const maxTokens = BATCH_CONFIG.MAX_TOKENS_SPELLING || 1500;
 
-  // Cache the result
-  setCache(cacheKey, spellingResult);
+    // For Kazakh text, prefer Gemini (better multilingual support)
+    const options = isKazakh && process.env.GEMINI_API_KEY && !checkGeminiDailyLimit()
+      ? { forceProvider: 'gemini' }
+      : {};
 
-  return { fileName, ...spellingResult };
+    const response = await makeAIRequest(prompt, maxTokens, 'spelling', options);
+    const result = safeJsonParse(response, fallback);
+
+    // For Kazakh, use less aggressive filtering (Gemini handles it better)
+    const validErrors = isKazakh
+      ? filterSpellingErrors(result.errors || [], true)
+      : filterSpellingErrors(result.errors || [], false);
+
+    const spellingResult = {
+      errors: validErrors,
+      totalErrors: validErrors.length,
+      coverage: 100, // Always 100%
+      language
+    };
+
+    // Cache the result
+    setCache(cacheKey, spellingResult);
+
+    return { fileName, ...spellingResult };
+  } catch (error) {
+    console.error(`Spell check error for "${fileName}":`, error.message);
+
+    // Re-throw rate limit errors so UI can show proper message
+    if (error.message?.includes('ALL_PROVIDERS_EXHAUSTED') ||
+        error.message?.includes('RATE_LIMIT') ||
+        error.message?.includes('413') ||
+        error.message?.includes('too large')) {
+      throw new Error(`SPELL_CHECK_LIMIT|Не удалось проверить орфографию "${fileName}" - превышен лимит AI. Попробуйте позже или обновите тариф.`);
+    }
+
+    return { fileName, ...fallback };
+  }
 };
 
 /**
@@ -1609,17 +1790,14 @@ const processSpellingArticle = async (article) => {
 
 /**
  * Review article
- * Smart content sizing: full content for Gemini, limited for Groq
+ * ALWAYS reviews 100% of article content - no sampling or truncation
+ * If provider limits don't allow full review, throws error with message
  */
 export const reviewArticle = async (content, fileName) => {
-  // Determine content limit based on available provider
-  // Groq: 12K TPM = ~6000 chars for content (with prompt overhead)
-  // Gemini: 250K TPM = can handle full article
-  const geminiAvailable = process.env.GEMINI_API_KEY && !checkGeminiDailyLimit();
-  const maxChars = geminiAvailable ? content.length : 8000; // Groq: 8000 chars to stay under 12K TPM
-  const textToReview = content.substring(0, maxChars);
+  // ALWAYS use full content - 100% analysis required
+  const textToReview = content;
 
-  console.log(`Review "${fileName}": ${content.length} chars, using ${textToReview.length} chars, provider=${geminiAvailable ? 'Gemini' : 'Groq'}`);
+  console.log(`Review "${fileName}": ${content.length} chars (100%), requesting full analysis`);
 
   const prompt = `Проведи рецензию научной статьи.
 
@@ -1676,10 +1854,20 @@ ${textToReview}
       relevance: { score: clampScore(review.relevance?.score), comment: review.relevance?.comment || '' },
       overallScore: clampScore(review.overallScore),
       summary: review.summary || fallback.summary,
-      recommendations: Array.isArray(review.recommendations) ? review.recommendations.filter(r => r && typeof r === 'string') : []
+      recommendations: Array.isArray(review.recommendations) ? review.recommendations.filter(r => r && typeof r === 'string') : [],
+      coverage: 100 // Always 100%
     };
   } catch (error) {
-    console.error('Review error:', error);
+    console.error(`Review error for "${fileName}":`, error.message);
+
+    // Re-throw rate limit errors so UI can show proper message
+    if (error.message?.includes('ALL_PROVIDERS_EXHAUSTED') ||
+        error.message?.includes('RATE_LIMIT') ||
+        error.message?.includes('413') ||
+        error.message?.includes('too large')) {
+      throw new Error(`REVIEW_LIMIT|Не удалось создать рецензию "${fileName}" - превышен лимит AI. Попробуйте позже или обновите тариф.`);
+    }
+
     return { fileName, ...fallback };
   }
 };
