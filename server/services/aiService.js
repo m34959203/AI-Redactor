@@ -1458,6 +1458,45 @@ const KAZAKH_PATTERN = /[ӘәҒғҚқҢңӨөҰұҮүҺһІі]/;
 // Common Kazakh words without special characters
 const KAZAKH_WORDS = /^(сауаттылық|білім|оқыту|мектеп|тіл|және|бойынша|туралы|арқылы|жүйесі|дамуы|қазақ|орыс|математикалық|жағдайда|сабақ|оқушы|мұғалім|әдіс|тәсіл|ұйым|жұмыс|бағдарлама|ғылым|тарих|мәдениет|қоғам|мемлекет|заң|құқық|денсаулық|спорт|өнер|музыка)$/i;
 
+/**
+ * Detect primary language of text
+ * @returns {'kazakh' | 'russian' | 'english' | 'mixed'}
+ */
+const detectTextLanguage = (text) => {
+  if (!text) return 'mixed';
+
+  const sample = text.substring(0, 3000);
+
+  // Count Kazakh-specific characters
+  const kazakhChars = (sample.match(/[ӘәҒғҚқҢңӨөҰұҮүІі]/g) || []).length;
+
+  // Count Cyrillic characters (Russian + Kazakh common)
+  const cyrillicChars = (sample.match(/[а-яёА-ЯЁ]/g) || []).length;
+
+  // Count Latin characters
+  const latinChars = (sample.match(/[a-zA-Z]/g) || []).length;
+
+  const totalChars = kazakhChars + cyrillicChars + latinChars;
+  if (totalChars === 0) return 'mixed';
+
+  // If significant Kazakh-specific characters, it's Kazakh
+  if (kazakhChars > 10 || kazakhChars / totalChars > 0.02) {
+    return 'kazakh';
+  }
+
+  // If mostly Cyrillic, it's Russian
+  if (cyrillicChars > latinChars * 2) {
+    return 'russian';
+  }
+
+  // If mostly Latin, it's English
+  if (latinChars > cyrillicChars * 2) {
+    return 'english';
+  }
+
+  return 'mixed';
+};
+
 // Known synonym pairs that are NOT spelling errors
 const SYNONYM_PAIRS = [
   ['disperse', 'deflect'], ['decrease', 'reduction'], ['especially', 'particularly'],
@@ -1498,8 +1537,10 @@ const calculateSimilarity = (str1, str2) => {
 
 /**
  * Filter out false positive spelling errors
+ * @param {Array} errors - Array of spelling errors
+ * @param {boolean} isKazakhMode - If true, allow Kazakh words through (Gemini handles them)
  */
-const filterSpellingErrors = (errors) => {
+const filterSpellingErrors = (errors, isKazakhMode = false) => {
   if (!Array.isArray(errors)) return [];
 
   return errors.filter(err => {
@@ -1513,13 +1554,14 @@ const filterSpellingErrors = (errors) => {
     const normalizedSuggestion = suggestion.toLowerCase().normalize('NFC');
     if (normalizedWord === normalizedSuggestion) return false;
 
-    // Filter out Kazakh words (containing Kazakh-specific characters)
-    if (KAZAKH_PATTERN.test(word) || KAZAKH_PATTERN.test(suggestion)) return false;
+    // In Kazakh mode, allow Kazakh words through (Gemini checked them)
+    // In non-Kazakh mode, filter out Kazakh words (they weren't checked properly)
+    if (!isKazakhMode) {
+      if (KAZAKH_PATTERN.test(word) || KAZAKH_PATTERN.test(suggestion)) return false;
+      if (KAZAKH_WORDS.test(word)) return false;
+    }
 
-    // Filter out common Kazakh words even without special characters
-    if (KAZAKH_WORDS.test(word)) return false;
-
-    // Filter out known synonym pairs
+    // Filter out known synonym pairs (applies to all languages)
     for (const [syn1, syn2] of SYNONYM_PAIRS) {
       if ((normalizedWord.includes(syn1) && normalizedSuggestion.includes(syn2)) ||
           (normalizedWord.includes(syn2) && normalizedSuggestion.includes(syn1))) {
@@ -1549,6 +1591,7 @@ const filterSpellingErrors = (errors) => {
 /**
  * Check spelling for a single article
  * ALWAYS checks 100% of article content - no sampling or truncation
+ * Supports: Russian, English, Kazakh (Kazakh uses Gemini preferentially)
  * If provider limits don't allow full check, throws error with message
  */
 export const checkSpelling = async (content, fileName) => {
@@ -1559,12 +1602,51 @@ export const checkSpelling = async (content, fileName) => {
 
   const fallback = { errors: [], totalErrors: 0 };
 
+  // Detect language
+  const language = detectTextLanguage(content);
+  const isKazakh = language === 'kazakh';
+
   // ALWAYS use full content - 100% analysis required
   const textToCheck = content;
 
-  console.log(`Spell check "${fileName}": ${content.length} chars (100%), requesting full analysis`);
+  console.log(`Spell check "${fileName}": ${content.length} chars (100%), language=${language}, requesting full analysis`);
 
-  const prompt = `## ЗАДАЧА
+  // Build language-specific prompt
+  let prompt;
+
+  if (isKazakh) {
+    // Kazakh-specific prompt (uses Gemini which has better Kazakh support)
+    prompt = `## ТАПСЫРМА / ЗАДАЧА
+Қазақ, орыс және ағылшын тілдеріндегі ОРФОГРАФИЯЛЫҚ ҚАТЕЛЕРДІ (қате жазылған сөздер) тап.
+Найди ОРФОГРАФИЧЕСКИЕ ОШИБКИ в тексте на казахском, русском и английском языках.
+
+## ОРФОГРАФИЯЛЫҚ ҚАТЕ ДЕГЕНІМІЗ / ЧТО ЯВЛЯЕТСЯ ОШИБКОЙ:
+- Қате әріп: "білім" емес "білім" дұрыс жазылған / Неправильная буква
+- Артық әріп: лишняя буква
+- Жетіспейтін әріп: пропущенная буква
+- Қазақ тіліндегі ерекше әріптер: Ә, Ғ, Қ, Ң, Ө, Ұ, Ү, І — дұрыс қолдануын тексер
+
+## ҚАТЕ ЕМЕС / НЕ ЯВЛЯЕТСЯ ОШИБКОЙ:
+❌ Синонимдер / Синонимы — разные слова с похожим значением
+❌ Стилистика — замена одного правильного слова другим
+❌ Грамматика — падежи, согласование
+❌ Есімдер, терминдер / Имена, термины, аббревиатуры
+
+## МЫСАЛДАР / ПРИМЕРЫ:
+✅ ҚАТЕ: {"word": "билім", "suggestion": "білім"} — қате әріп
+✅ ҚАТЕ: {"word": "эксперемент", "suggestion": "эксперимент"} — пропущена буква
+❌ ҚАТЕ ЕМЕС: синонимдерді ауыстыру
+
+## ЖАУАП ФОРМАТЫ / ФОРМАТ ОТВЕТА:
+{"errors": [{"word": "қате_сөз", "suggestion": "дұрыс_сөз", "context": "..."}], "totalErrors": N}
+
+Қате жоқ болса / Если ошибок нет: {"errors": [], "totalErrors": 0}
+
+## МӘТІН / ТЕКСТ:
+${textToCheck}`;
+  } else {
+    // Russian/English prompt
+    prompt = `## ЗАДАЧА
 Найди ТОЛЬКО ОРФОГРАФИЧЕСКИЕ ОШИБКИ (опечатки, неправильное написание букв).
 
 ## ЧТО ЯВЛЯЕТСЯ ОРФОГРАФИЧЕСКОЙ ОШИБКОЙ:
@@ -1578,7 +1660,6 @@ export const checkSpelling = async (content, fileName) => {
 ❌ СТИЛИСТИКА: замена одного правильного слова другим правильным
 ❌ ГРАММАТИКА: падежи, согласование, времена глаголов
 ❌ ДОБАВЛЕНИЕ СЛОВ: "экологически" → "экологически чистой" — НЕ ошибка!
-❌ КАЗАХСКИЕ СЛОВА: любые слова с Ә, Ғ, Қ, Ң, Ө, Ұ, Ү, І
 ❌ ТЕРМИНЫ, ИМЕНА, АББРЕВИАТУРЫ
 
 ## КРИТЕРИЙ ПРОВЕРКИ:
@@ -1600,17 +1681,29 @@ export const checkSpelling = async (content, fileName) => {
 
 ## ТЕКСТ:
 ${textToCheck}`;
+  }
 
   try {
     const maxTokens = BATCH_CONFIG.MAX_TOKENS_SPELLING || 1500;
-    const response = await makeAIRequest(prompt, maxTokens, 'spelling');
+
+    // For Kazakh text, prefer Gemini (better multilingual support)
+    const options = isKazakh && process.env.GEMINI_API_KEY && !checkGeminiDailyLimit()
+      ? { forceProvider: 'gemini' }
+      : {};
+
+    const response = await makeAIRequest(prompt, maxTokens, 'spelling', options);
     const result = safeJsonParse(response, fallback);
 
-    const validErrors = filterSpellingErrors(result.errors || []);
+    // For Kazakh, use less aggressive filtering (Gemini handles it better)
+    const validErrors = isKazakh
+      ? filterSpellingErrors(result.errors || [], true)
+      : filterSpellingErrors(result.errors || [], false);
+
     const spellingResult = {
       errors: validErrors,
       totalErrors: validErrors.length,
-      coverage: 100 // Always 100%
+      coverage: 100, // Always 100%
+      language
     };
 
     // Cache the result
