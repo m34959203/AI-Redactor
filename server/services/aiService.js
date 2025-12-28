@@ -1053,8 +1053,51 @@ ${content.substring(0, 4000)}
 // ============ BATCH ANALYSIS (MAXIMUM SPEED) ============
 
 /**
+ * Analyze ALL articles with parallel batch processing
+ * Splits into batches and processes them in parallel for maximum speed
+ * @param {Array} articles - Array of {fileName, content}
+ * @returns {Array} - Array of analysis results
+ */
+export const analyzeAllArticles = async (articles) => {
+  if (!articles || articles.length === 0) return [];
+
+  const { BATCH_SIZE, PARALLEL_BATCHES = 2 } = BATCH_CONFIG;
+  const allResults = [];
+
+  // Split all articles into batches
+  const batches = [];
+  for (let i = 0; i < articles.length; i += BATCH_SIZE) {
+    batches.push(articles.slice(i, i + BATCH_SIZE));
+  }
+
+  console.log(`Processing ${articles.length} articles in ${batches.length} batches (${PARALLEL_BATCHES} parallel)`);
+  const startTime = Date.now();
+
+  // Process batches in parallel chunks
+  for (let i = 0; i < batches.length; i += PARALLEL_BATCHES) {
+    const parallelBatches = batches.slice(i, i + PARALLEL_BATCHES);
+
+    // Process this chunk of batches in parallel
+    const batchPromises = parallelBatches.map(batch => analyzeArticlesBatch(batch));
+    const batchResults = await Promise.all(batchPromises);
+
+    // Flatten results
+    for (const results of batchResults) {
+      allResults.push(...results);
+    }
+
+    console.log(`Processed ${Math.min((i + PARALLEL_BATCHES) * BATCH_SIZE, articles.length)}/${articles.length} articles`);
+  }
+
+  const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+  console.log(`All ${articles.length} articles analyzed in ${duration}s (${(articles.length / parseFloat(duration)).toFixed(1)} articles/sec)`);
+
+  return allResults;
+};
+
+/**
  * Analyze multiple articles in one request
- * Up to 5 articles per batch = 20x faster than individual requests
+ * Up to 6 articles per batch for maximum efficiency
  * @param {Array} articles - Array of {fileName, content}
  * @returns {Array} - Array of analysis results
  */
@@ -1430,8 +1473,8 @@ export const checkSpelling = async (content, fileName) => {
   const cached = getCached(cacheKey);
   if (cached) return { fileName, ...cached };
 
-  // Reduced from 4000 to 2000 chars to minimize token usage
-  const textToCheck = content.substring(0, 2000);
+  // Full article content - Gemini has 250K TPM, plenty for complete spell check
+  const textToCheck = content;
 
   const prompt = `## ЗАДАЧА
 Найди ТОЛЬКО реальные орфографические ОШИБКИ в тексте.
@@ -1467,11 +1510,9 @@ ${textToCheck}`;
     // Use configured token limit for spelling to conserve TPM
     const maxTokens = BATCH_CONFIG.MAX_TOKENS_SPELLING || 500;
 
-    // CRITICAL: Use OpenRouter for spelling when available
-    // Groq has only 6K TPM for 8B model, causing constant 429 errors
-    // OpenRouter has 200 req/day which is enough for spell checking
-    const useOpenRouter = !!process.env.OPENROUTER_API_KEY;
-    const response = await makeAIRequest(prompt, maxTokens, 'spelling', { forceFallback: useOpenRouter });
+    // Gemini is now primary with 250K TPM - plenty for spelling
+    // No need to force fallback anymore
+    const response = await makeAIRequest(prompt, maxTokens, 'spelling');
     const result = safeJsonParse(response, fallback);
 
     const validErrors = filterSpellingErrors(result.errors);
@@ -1516,8 +1557,8 @@ export const checkSpellingBatch = async (articles) => {
 
   console.log(`Batch spelling: ${cachedResults.length} cached, ${uncachedArticles.length} to process`);
 
-  // Process uncached articles in PARALLEL (up to 3 concurrent)
-  const MAX_CONCURRENT = 3;
+  // Process uncached articles in PARALLEL (configurable concurrency)
+  const MAX_CONCURRENT = BATCH_CONFIG.PARALLEL_SPELLING || 3;
   const processedResults = [];
 
   // Split into chunks for parallel processing
@@ -1566,7 +1607,7 @@ export const reviewArticle = async (content, fileName) => {
 5. relevance: актуальность темы
 
 ТЕКСТ (${fileName}):
-${content.substring(0, 5000)}
+${content}
 
 Ответь JSON:
 {
@@ -1592,7 +1633,8 @@ ${content.substring(0, 5000)}
   };
 
   try {
-    const response = await makeAIRequest(prompt, 2500, 'review');
+    const maxTokens = BATCH_CONFIG.MAX_TOKENS_REVIEW || 3000;
+    const response = await makeAIRequest(prompt, maxTokens, 'review');
     const review = safeJsonParse(response, null);
 
     if (!review?.structure) return { fileName, ...fallback };
@@ -1831,6 +1873,7 @@ export const getPromptVersion = () => ({
 export default {
   analyzeArticle,
   analyzeArticlesBatch,
+  analyzeAllArticles,  // NEW: Parallel batch processing for all articles
   extractMetadata,
   detectSection,
   checkSpelling,
