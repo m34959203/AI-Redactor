@@ -1473,9 +1473,8 @@ export const checkSpelling = async (content, fileName) => {
   const cached = getCached(cacheKey);
   if (cached) return { fileName, ...cached };
 
-  // Increased to 6000 chars for better coverage (~40-50% of typical article)
-  // Gemini has 250K TPM - plenty of headroom for thorough spell checking
-  const textToCheck = content.substring(0, 6000);
+  // Full article content - Gemini has 250K TPM, plenty for complete spell check
+  const textToCheck = content;
 
   const prompt = `## ЗАДАЧА
 Найди ТОЛЬКО реальные орфографические ОШИБКИ в тексте.
@@ -1608,7 +1607,7 @@ export const reviewArticle = async (content, fileName) => {
 5. relevance: актуальность темы
 
 ТЕКСТ (${fileName}):
-${content.substring(0, 5000)}
+${content}
 
 Ответь JSON:
 {
@@ -1634,7 +1633,8 @@ ${content.substring(0, 5000)}
   };
 
   try {
-    const response = await makeAIRequest(prompt, 2500, 'review');
+    const maxTokens = BATCH_CONFIG.MAX_TOKENS_REVIEW || 3000;
+    const response = await makeAIRequest(prompt, maxTokens, 'review');
     const review = safeJsonParse(response, null);
 
     if (!review?.structure) return { fileName, ...fallback };

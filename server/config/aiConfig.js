@@ -20,8 +20,11 @@ export const BATCH_CONFIG = {
   // Maximum tokens for single analysis
   MAX_TOKENS_SINGLE: 600,
 
-  // Maximum tokens for spelling check
-  MAX_TOKENS_SPELLING: 500,
+  // Maximum tokens for spelling check (full article = more potential errors)
+  MAX_TOKENS_SPELLING: 1500,
+
+  // Maximum tokens for review (full article = detailed analysis)
+  MAX_TOKENS_REVIEW: 3000,
 
   // Parallel processing settings (unchanged - doesn't affect quality)
   PARALLEL_BATCHES: 2,        // Process 2 batches simultaneously
