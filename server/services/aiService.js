@@ -1,8 +1,8 @@
 /**
  * AI Service - Multi-provider API integration
- * Primary: Groq (fast, 100K TPD free)
- * Fallback 1: OpenRouter (200 req/day free)
- * Fallback 2: Google Gemini (1000 req/day free)
+ * Primary: Google Gemini (1000 req/day free, best for Kazakh/Russian)
+ * Fallback 1: Groq (fast, 100K TPD free)
+ * Fallback 2: OpenRouter (200 req/day free)
  */
 
 import crypto from 'crypto';
@@ -128,19 +128,19 @@ const updateMetrics = (provider, responseTime, isError = false) => {
   metrics.avgResponseTime = (metrics.avgResponseTime * (metrics.totalRequests - 1) + responseTime) / metrics.totalRequests;
 };
 
-// Get active provider (Groq -> OpenRouter -> Gemini)
+// Get active provider (Gemini PRIMARY -> Groq -> OpenRouter)
 const getActiveProvider = () => {
-  // Priority 1: Groq (if not exhausted)
+  // Priority 1: Gemini (1000 req/day - highest free limit, best for Kazakh/Russian)
+  if (process.env.GEMINI_API_KEY && !checkGeminiDailyLimit()) {
+    return { provider: PROVIDERS.gemini, apiKey: process.env.GEMINI_API_KEY };
+  }
+  // Priority 2: Groq (fast, 100K TPD)
   if (process.env.GROQ_API_KEY && !checkGroqDailyLimit()) {
     return { provider: PROVIDERS.groq, apiKey: process.env.GROQ_API_KEY };
   }
-  // Priority 2: OpenRouter (if not exhausted)
+  // Priority 3: OpenRouter (200 req/day)
   if (process.env.OPENROUTER_API_KEY && !checkOpenRouterDailyLimit()) {
     return { provider: PROVIDERS.openrouter, apiKey: process.env.OPENROUTER_API_KEY };
-  }
-  // Priority 3: Gemini (1000 req/day - highest free limit)
-  if (process.env.GEMINI_API_KEY && !checkGeminiDailyLimit()) {
-    return { provider: PROVIDERS.gemini, apiKey: process.env.GEMINI_API_KEY };
   }
   return null;
 };
