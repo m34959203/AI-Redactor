@@ -171,10 +171,11 @@
         .badge-primary { background: #00d4ff; color: #1a1a2e; }
         .badge-secondary { background: #9d4edd; color: #fff; }
         .badge-success { background: #00c853; color: #1a1a2e; }
+        .badge-warning { background: #ff9800; color: #1a1a2e; }
 
         .stats-grid {
             display: grid;
-            grid-template-columns: repeat(4, 1fr);
+            grid-template-columns: repeat(3, 1fr);
             gap: 30px;
             margin: 40px 0;
         }
@@ -212,11 +213,6 @@
             overflow-x: auto;
             border-left: 4px solid #00d4ff;
         }
-
-        .code-block .keyword { color: #ff7b72; }
-        .code-block .string { color: #a5d6ff; }
-        .code-block .comment { color: #8b949e; }
-        .code-block .function { color: #d2a8ff; }
 
         .flow-diagram {
             display: flex;
@@ -294,8 +290,19 @@
 
         .author {
             font-size: 1.5rem;
-            color: #666;
+            color: #00d4ff;
             margin-top: 60px;
+        }
+
+        .hackathon-badge {
+            background: linear-gradient(90deg, #ff6b35, #f7931e);
+            color: white;
+            padding: 15px 40px;
+            border-radius: 30px;
+            font-size: 1.3rem;
+            font-weight: bold;
+            margin-top: 30px;
+            display: inline-block;
         }
 
         .two-columns {
@@ -363,26 +370,6 @@
             font-weight: bold;
         }
 
-        .feature-list {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 20px;
-        }
-
-        .feature-item {
-            display: flex;
-            align-items: flex-start;
-            gap: 15px;
-            padding: 15px;
-            background: rgba(255,255,255,0.03);
-            border-radius: 10px;
-        }
-
-        .feature-icon {
-            font-size: 1.5rem;
-            color: #00d4ff;
-        }
-
         .prompt-example {
             background: linear-gradient(135deg, #1e3a5f 0%, #2d1b4e 100%);
             border-radius: 15px;
@@ -399,6 +386,45 @@
             font-size: 0.95rem;
             color: #7ee787;
         }
+
+        .warning-box {
+            background: rgba(255, 152, 0, 0.2);
+            border: 2px solid #ff9800;
+            border-radius: 15px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+
+        .warning-box h3 {
+            color: #ff9800;
+            margin-top: 0;
+        }
+
+        .contact-card {
+            background: linear-gradient(135deg, rgba(0, 212, 255, 0.15), rgba(157, 78, 221, 0.15));
+            border: 2px solid #00d4ff;
+            border-radius: 20px;
+            padding: 40px;
+            text-align: center;
+            margin-top: 40px;
+        }
+
+        .contact-name {
+            font-size: 2rem;
+            color: #fff;
+            margin-bottom: 10px;
+        }
+
+        .contact-company {
+            font-size: 1.5rem;
+            color: #9d4edd;
+            margin-bottom: 20px;
+        }
+
+        .contact-phone {
+            font-size: 1.8rem;
+            color: #00d4ff;
+        }
     </style>
 </head>
 <body>
@@ -406,9 +432,10 @@
         <!-- Slide 1: Title -->
         <div class="slide title-slide active" data-slide="1">
             <h1>AI-Редактор научного журнала</h1>
-            <p class="subtitle">Автоматизация сборки выпусков за 10 минут</p>
+            <p class="subtitle">Автоматизация сборки выпусков журналов</p>
             <p style="font-size: 1.3rem; color: #00d4ff;">Версия 3.1 — Мульти-провайдерная архитектура</p>
-            <p class="author">Дипломный проект</p>
+            <div class="hackathon-badge">🏆 Ulytau Hackathon 4.0</div>
+            <p class="author">Создаём AI для научных журналов!</p>
         </div>
 
         <!-- Slide 2: Problem -->
@@ -429,8 +456,8 @@
                 <div>
                     <h3>Затраты времени</h3>
                     <div class="stat-card" style="margin-top: 30px;">
-                        <div class="stat-number">4-6</div>
-                        <div class="stat-label">часов на один выпуск</div>
+                        <div class="stat-number">10-15</div>
+                        <div class="stat-label">дней на один выпуск</div>
                     </div>
                     <div class="stat-card" style="margin-top: 20px;">
                         <div class="stat-number">80%</div>
@@ -445,8 +472,8 @@
             <h2>Решение: AI-Редактор</h2>
             <div class="stats-grid">
                 <div class="stat-card">
-                    <div class="stat-number">10</div>
-                    <div class="stat-label">минут на выпуск</div>
+                    <div class="stat-number">1-2</div>
+                    <div class="stat-label">дня на выпуск</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-number">100%</div>
@@ -455,10 +482,6 @@
                 <div class="stat-card">
                     <div class="stat-number">3</div>
                     <div class="stat-label">языка поддержки</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-number">$0</div>
-                    <div class="stat-label">стоимость AI</div>
                 </div>
             </div>
             <div class="flow-diagram">
@@ -487,6 +510,10 @@
                     <div>Сборка<br>PDF</div>
                 </div>
             </div>
+            <div class="warning-box">
+                <h3>💡 Рекомендация</h3>
+                <p>Для стабильной работы рекомендуется <span class="highlight">платная подписка Google Gemini</span> — надёжные лимиты и приоритетная поддержка</p>
+            </div>
         </div>
 
         <!-- Slide 4: AI Architecture -->
@@ -505,7 +532,6 @@
     │  OpenRouter  │    │     Groq     │    │    Gemini    │
     │   (PRIMARY)  │    │  (FALLBACK)  │    │   (BACKUP)   │
     │   DeepSeek   │    │  Llama 3.3   │    │    Flash     │
-    │  200 req/day │    │ 100K tok/day │    │ 1500 req/day │
     └──────────────┘    └──────────────┘    └──────────────┘
             </div>
             <p style="text-align: center; color: #9d4edd; font-size: 1.3rem;">
@@ -521,38 +547,30 @@
                     <th>Приоритет</th>
                     <th>Провайдер</th>
                     <th>Модель</th>
-                    <th>Free Tier</th>
                     <th>Особенности</th>
                 </tr>
                 <tr>
                     <td><span class="badge badge-primary">1 PRIMARY</span></td>
                     <td><strong>OpenRouter</strong></td>
                     <td>DeepSeek R1T2 Chimera</td>
-                    <td>200 req/day</td>
                     <td>Лучший для JSON и инструкций</td>
                 </tr>
                 <tr>
                     <td><span class="badge badge-secondary">2 FALLBACK</span></td>
                     <td><strong>Groq</strong></td>
                     <td>Llama 3.3 70B</td>
-                    <td>100K tokens/day</td>
                     <td>Самый быстрый (300 tok/s)</td>
                 </tr>
                 <tr>
                     <td><span class="badge badge-success">3 BACKUP</span></td>
                     <td><strong>Google Gemini</strong></td>
-                    <td>Gemini 2.0 Flash Lite</td>
-                    <td>1500 req/day</td>
+                    <td>Gemini 2.0 Flash</td>
                     <td>Отличная мультиязычность</td>
                 </tr>
             </table>
-            <div class="card" style="margin-top: 30px;">
-                <h3 style="margin-top: 0;">Почему три провайдера?</h3>
-                <ul>
-                    <li><span class="highlight">Надёжность</span> — если один недоступен, работает другой</li>
-                    <li><span class="highlight">Бесплатно</span> — суммарно ~1900 запросов/день без оплаты</li>
-                    <li><span class="highlight">Оптимизация</span> — каждый провайдер лучше для своих задач</li>
-                </ul>
+            <div class="warning-box">
+                <h3>⚠️ Важно: Платная подписка</h3>
+                <p>Бесплатные лимиты ограничены. Для production-использования <span class="highlight">рекомендуется платная подписка Google Gemini</span> — стабильные лимиты, высокая скорость, приоритетная поддержка.</p>
             </div>
         </div>
 
@@ -603,111 +621,8 @@
             </div>
         </div>
 
-        <!-- Slide 7: Batch Processing -->
+        <!-- Slide 7: Language Support -->
         <div class="slide" data-slide="7">
-            <h2>AI Оптимизация: Batch Processing</h2>
-            <div class="two-columns">
-                <div>
-                    <h3>Проблема: Rate Limits</h3>
-                    <p>Бесплатные API имеют ограничения:</p>
-                    <ul>
-                        <li>15-30 запросов в минуту</li>
-                        <li>200-1500 запросов в день</li>
-                        <li>Ошибки 429 (Too Many Requests)</li>
-                    </ul>
-
-                    <h3 style="margin-top: 40px;">Решение: Пакетная обработка</h3>
-                    <ul>
-                        <li><span class="highlight">4 статьи</span> за 1 API запрос</li>
-                        <li><span class="highlight">Combined prompts</span> — метаданные + раздел + оценка</li>
-                        <li><span class="highlight">Кэширование</span> — 30 минут TTL</li>
-                    </ul>
-                </div>
-                <div>
-                    <h3>Результат</h3>
-                    <table class="comparison-table">
-                        <tr>
-                            <td>Запросов на статью:</td>
-                            <td class="old">4</td>
-                            <td class="new">0.25</td>
-                        </tr>
-                        <tr>
-                            <td>Время на 30 статей:</td>
-                            <td class="old">~4 мин</td>
-                            <td class="new">~40 сек</td>
-                        </tr>
-                        <tr>
-                            <td>Ошибки 429:</td>
-                            <td class="old">Часто</td>
-                            <td class="new">Редко</td>
-                        </tr>
-                        <tr>
-                            <td>Анализ контента:</td>
-                            <td class="old">50%</td>
-                            <td class="new">100%</td>
-                        </tr>
-                    </table>
-                    <div class="stat-card" style="margin-top: 30px;">
-                        <div class="stat-number">16x</div>
-                        <div class="stat-label">меньше API запросов</div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Slide 8: Prompt Engineering -->
-        <div class="slide" data-slide="8">
-            <h2>AI: Prompt Engineering</h2>
-            <p>Специализированные промпты для каждой задачи</p>
-            <div class="two-columns" style="margin-top: 20px;">
-                <div>
-                    <div class="prompt-example">
-                        <h3 style="margin-top: 0; color: #00d4ff;">Batch Analysis Prompt</h3>
-                        <p style="font-size: 1.1rem; color: #ccc;">Анализ 4 статей за 1 запрос:</p>
-                        <div class="code-block" style="font-size: 0.85rem;">
-<span class="comment">## ЗАДАЧА</span>
-Проанализируй 4 научных статьи.
-
-<span class="comment">## РАЗДЕЛЫ (выбери ОДИН):</span>
-- ТЕХНИЧЕСКИЕ НАУКИ
-- ПЕДАГОГИЧЕСКИЕ НАУКИ
-- ЕСТЕСТВЕННЫЕ И ЭКОНОМИЧЕСКИЕ
-
-<span class="comment">## ИЗВЛЕЧЕНИЕ АВТОРА:</span>
-Форматы: "Фамилия И.О.", "И.О. Фамилия"
-Казахские: сохраняй Қ,Ғ,Ү,Ө,Ә,Ң
-
-<span class="comment">## ОТВЕТ (JSON массив):</span>
-[{fileName, title, author, section}]
-                        </div>
-                    </div>
-                </div>
-                <div>
-                    <div class="prompt-example">
-                        <h3 style="margin-top: 0; color: #00d4ff;">Spelling Check Prompt</h3>
-                        <p style="font-size: 1.1rem; color: #ccc;">Мультиязычная проверка:</p>
-                        <div class="code-block" style="font-size: 0.85rem;">
-<span class="comment">## ОПРЕДЕЛЕНИЕ ЯЗЫКА:</span>
-- "kazakh" — буквы Ә, Ғ, Қ, Ң, Ө
-- "cyrillic" — русский текст
-- "latin" — английский текст
-
-<span class="comment">## ЧТО ЯВЛЯЕТСЯ ОШИБКОЙ:</span>
-✅ Опечатки: "эксперемент" → "эксперимент"
-
-<span class="comment">## ЧТО НЕ ЯВЛЯЕТСЯ ОШИБКОЙ:</span>
-❌ Синонимы, стилистика, грамматика
-
-<span class="comment">## ОТВЕТ:</span>
-{language, errors: [{word, suggestion}]}
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Slide 9: Language Support -->
-        <div class="slide" data-slide="9">
             <h2>AI: Мультиязычная поддержка</h2>
             <div class="grid">
                 <div class="card">
@@ -747,128 +662,10 @@
                     </div>
                 </div>
             </div>
-            <p style="text-align: center; margin-top: 30px; font-size: 1.3rem;">
-                <span class="highlight">AI автоматически определяет язык</span> и применяет соответствующие правила проверки
-            </p>
         </div>
 
-        <!-- Slide 10: Tech Stack -->
-        <div class="slide" data-slide="10">
-            <h2>Технологии</h2>
-            <div class="two-columns">
-                <div>
-                    <h3>Frontend</h3>
-                    <div class="feature-list">
-                        <div class="feature-item">
-                            <span class="feature-icon">⚛️</span>
-                            <div>
-                                <strong>React 18</strong>
-                                <p style="font-size: 1rem; color: #888;">Современный UI с хуками</p>
-                            </div>
-                        </div>
-                        <div class="feature-item">
-                            <span class="feature-icon">⚡</span>
-                            <div>
-                                <strong>Vite</strong>
-                                <p style="font-size: 1rem; color: #888;">Быстрая сборка и HMR</p>
-                            </div>
-                        </div>
-                        <div class="feature-item">
-                            <span class="feature-icon">🎨</span>
-                            <div>
-                                <strong>Tailwind CSS</strong>
-                                <p style="font-size: 1rem; color: #888;">Utility-first стилизация</p>
-                            </div>
-                        </div>
-                        <div class="feature-item">
-                            <span class="feature-icon">📦</span>
-                            <div>
-                                <strong>Mammoth.js</strong>
-                                <p style="font-size: 1rem; color: #888;">Парсинг DOCX файлов</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div>
-                    <h3>Backend</h3>
-                    <div class="feature-list">
-                        <div class="feature-item">
-                            <span class="feature-icon">🟢</span>
-                            <div>
-                                <strong>Node.js + Express</strong>
-                                <p style="font-size: 1rem; color: #888;">REST API сервер</p>
-                            </div>
-                        </div>
-                        <div class="feature-item">
-                            <span class="feature-icon">🐘</span>
-                            <div>
-                                <strong>PostgreSQL</strong>
-                                <p style="font-size: 1rem; color: #888;">Хранение архива</p>
-                            </div>
-                        </div>
-                        <div class="feature-item">
-                            <span class="feature-icon">🤖</span>
-                            <div>
-                                <strong>Multi-Provider AI</strong>
-                                <p style="font-size: 1rem; color: #888;">OpenRouter, Groq, Gemini</p>
-                            </div>
-                        </div>
-                        <div class="feature-item">
-                            <span class="feature-icon">🚀</span>
-                            <div>
-                                <strong>Railway</strong>
-                                <p style="font-size: 1rem; color: #888;">Cloud deployment</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Slide 11: API Endpoints -->
-        <div class="slide" data-slide="11">
-            <h2>API Endpoints</h2>
-            <table class="provider-table">
-                <tr>
-                    <th>Endpoint</th>
-                    <th>Method</th>
-                    <th>Описание</th>
-                </tr>
-                <tr>
-                    <td><code>/api/ai/analyze-batch</code></td>
-                    <td><span class="badge badge-primary">POST</span></td>
-                    <td>Пакетный анализ до 4 статей</td>
-                </tr>
-                <tr>
-                    <td><code>/api/ai/spelling</code></td>
-                    <td><span class="badge badge-primary">POST</span></td>
-                    <td>Проверка орфографии (100% текста)</td>
-                </tr>
-                <tr>
-                    <td><code>/api/ai/review</code></td>
-                    <td><span class="badge badge-primary">POST</span></td>
-                    <td>Генерация рецензии</td>
-                </tr>
-                <tr>
-                    <td><code>/api/ai/health</code></td>
-                    <td><span class="badge badge-success">GET</span></td>
-                    <td>Статус всех провайдеров</td>
-                </tr>
-                <tr>
-                    <td><code>/api/ai/analytics/summary</code></td>
-                    <td><span class="badge badge-success">GET</span></td>
-                    <td>Confidence scores и метрики</td>
-                </tr>
-                <tr>
-                    <td><code>/api/generate-journal</code></td>
-                    <td><span class="badge badge-primary">POST</span></td>
-                    <td>Генерация PDF журнала</td>
-                </tr>
-            </table>
-        </div>
-
-        <!-- Slide 12: Demo -->
-        <div class="slide" data-slide="12">
+        <!-- Slide 8: Demo -->
+        <div class="slide" data-slide="8">
             <h2>Демонстрация</h2>
             <div class="two-columns">
                 <div>
@@ -905,9 +702,9 @@
                         <div style="font-size: 5rem; margin-bottom: 20px;">🖥️</div>
                         <h3>Live Demo</h3>
                         <p style="margin-top: 20px;">
-                            <a href="https://ai-redactor.railway.app" target="_blank"
-                               style="color: #00d4ff; font-size: 1.3rem;">
-                                ai-redactor.railway.app
+                            <a href="https://ai-redactor-production.up.railway.app/" target="_blank"
+                               style="color: #00d4ff; font-size: 1.2rem;">
+                                ai-redactor-production.up.railway.app
                             </a>
                         </p>
                     </div>
@@ -915,8 +712,8 @@
             </div>
         </div>
 
-        <!-- Slide 13: Results -->
-        <div class="slide" data-slide="13">
+        <!-- Slide 9: Results -->
+        <div class="slide" data-slide="9">
             <h2>Результаты</h2>
             <div class="stats-grid">
                 <div class="stat-card">
@@ -924,79 +721,53 @@
                     <div class="stat-label">точность классификации</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-number">16x</div>
-                    <div class="stat-label">экономия API запросов</div>
+                    <div class="stat-number">7-10x</div>
+                    <div class="stat-label">ускорение работы</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-number">6x</div>
-                    <div class="stat-label">ускорение обработки</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-number">$0</div>
-                    <div class="stat-label">стоимость AI</div>
+                    <div class="stat-number">100%</div>
+                    <div class="stat-label">анализ контента</div>
                 </div>
             </div>
             <div class="grid" style="margin-top: 40px;">
                 <div class="card">
                     <h3>Было (ручная работа)</h3>
                     <ul>
-                        <li>4-6 часов на выпуск</li>
-                        <li>Ошибки при копировании</li>
-                        <li>Субъективная классификация</li>
+                        <li><span class="old">10-15 дней</span> на выпуск</li>
+                        <li>Ошибки при копировании данных</li>
+                        <li>Субъективная классификация статей</li>
                         <li>Неполная проверка орфографии</li>
+                        <li>Выгорание редакторов</li>
                     </ul>
                 </div>
                 <div class="card">
                     <h3>Стало (AI-Редактор)</h3>
                     <ul>
-                        <li><span class="highlight">10 минут</span> на выпуск</li>
+                        <li><span class="highlight">1-2 дня</span> на выпуск</li>
                         <li>Автоматическое извлечение данных</li>
                         <li>AI классификация с confidence score</li>
                         <li><span class="highlight">100%</span> проверка текста</li>
+                        <li>Редактор фокусируется на качестве</li>
                     </ul>
                 </div>
             </div>
         </div>
 
-        <!-- Slide 14: Future -->
-        <div class="slide" data-slide="14">
-            <h2>Планы развития</h2>
-            <div class="grid">
-                <div class="card">
-                    <div class="icon">📱</div>
-                    <h3>Мобильная версия</h3>
-                    <p>Адаптивный интерфейс для работы с телефона</p>
-                </div>
-                <div class="card">
-                    <div class="icon">👥</div>
-                    <h3>Многопользовательский режим</h3>
-                    <p>Авторизация и роли (редактор, рецензент)</p>
-                </div>
-                <div class="card">
-                    <div class="icon">🔗</div>
-                    <h3>Интеграции</h3>
-                    <p>ORCID, DOI, научные базы данных</p>
-                </div>
-                <div class="card">
-                    <div class="icon">📊</div>
-                    <h3>Расширенная аналитика</h3>
-                    <p>Статистика по авторам, темам, качеству</p>
-                </div>
-            </div>
-        </div>
-
-        <!-- Slide 15: Thank You -->
-        <div class="slide title-slide" data-slide="15">
+        <!-- Slide 10: Thank You -->
+        <div class="slide title-slide" data-slide="10">
             <h1>Спасибо за внимание!</h1>
             <p class="subtitle">Вопросы?</p>
-            <div style="margin-top: 60px;">
+            <div style="margin-top: 40px;">
                 <p style="font-size: 1.3rem; color: #00d4ff;">
-                    🌐 ai-redactor.railway.app
-                </p>
-                <p style="font-size: 1.3rem; color: #9d4edd; margin-top: 15px;">
-                    📂 github.com/m34959203/AI-Redactor
+                    🌐 <a href="https://ai-redactor-production.up.railway.app/" target="_blank" style="color: #00d4ff;">ai-redactor-production.up.railway.app</a>
                 </p>
             </div>
+            <div class="contact-card">
+                <div class="contact-name">Дмитрий Миронов</div>
+                <div class="contact-company">MDTechnology</div>
+                <div class="contact-phone">📞 8 705 623 59 22</div>
+            </div>
+            <div class="hackathon-badge" style="margin-top: 40px;">🏆 Ulytau Hackathon 4.0</div>
         </div>
     </div>
 
@@ -1006,7 +777,7 @@
     </div>
 
     <div class="slide-counter">
-        <span id="currentSlide">1</span> / <span id="totalSlides">15</span>
+        <span id="currentSlide">1</span> / <span id="totalSlides">10</span>
     </div>
 
     <script>
