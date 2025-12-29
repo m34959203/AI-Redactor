@@ -33,24 +33,22 @@ export const BATCH_CONFIG = {
 
 // ============ RATE LIMITING ============
 export const RATE_LIMIT_CONFIG = {
-  // AGGRESSIVE delays for maximum speed (within rate limits)
-  // Gemini: 30 RPM = minimum 2s, but we use 1.2s with burst capacity
-  GEMINI_DELAY: 1200,         // 1.2s - aggressive, uses burst capacity
-  GROQ_DELAY: 2000,           // 2s fallback
-  OPENROUTER_DELAY: 1500,     // 1.5s fallback
+  // Gemini 2.5 Flash: 15 RPM = 4s minimum delay
+  // Используем 4.5s для безопасности
+  GEMINI_DELAY: 4500,         // 4.5s between requests (15 RPM safe)
 
-  // Delay after hitting rate limit (quick recovery)
-  DELAY_AFTER_429: 5000,      // 5s wait on 429 (aggressive retry)
+  // Delay after hitting rate limit (recovery)
+  DELAY_AFTER_429: 10000,     // 10s wait on 429
 
-  // Spelling checks - minimal delay for parallel processing
-  SPELLING_DELAY: 500,        // 0.5s between spell checks
+  // Spelling checks - slightly longer for stability
+  SPELLING_DELAY: 2000,       // 2s between spell checks
 
   // Retry configuration
-  MAX_RETRIES: 2,             // Quick fail, switch provider
-  BACKOFF_MULTIPLIER: 1500,   // 1.5s backoff base
+  MAX_RETRIES: 3,             // More retries since single provider
+  BACKOFF_MULTIPLIER: 2000,   // 2s backoff base
 
   // Minimum delay between ANY requests
-  MIN_DELAY: 200              // 200ms minimum (aggressive)
+  MIN_DELAY: 1000             // 1s minimum (safe for Gemini)
 };
 
 // ============ CACHE ============
@@ -61,54 +59,22 @@ export const CACHE_CONFIG = {
 };
 
 // ============ PROVIDERS ============
+// Gemini 1.5 Flash - единственный провайдер (стабильная версия с хорошим free tier)
+// Free tier: 1500 req/day, 15 RPM, 1M tokens/day
+// Paid tier: $0.075/1M input, $0.30/1M output
 export const PROVIDERS = {
-  groq: {
-    name: 'Groq',
-    url: 'https://api.groq.com/openai/v1/chat/completions',
-    model: 'llama-3.3-70b-versatile',
-    // Fallback: llama-3.1-8b-instant (faster, 560 T/s, less TPM usage)
-    // See https://console.groq.com/docs/models for current models
-    fallbackModels: ['llama-3.1-8b-instant'],
-    keyEnv: 'GROQ_API_KEY',
-    // Free tier TPM limits (NOT paid tier!):
-    // - llama-3.3-70b-versatile: 12K TPM
-    // - llama-3.1-8b-instant: 6K TPM
-    rateLimit: { requestsPerMin: 30, tokensPerMin: 12000 },
-    headers: (apiKey) => ({
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`
-    })
-  },
-  openrouter: {
-    name: 'OpenRouter',
-    url: 'https://openrouter.ai/api/v1/chat/completions',
-    model: 'tngtech/deepseek-r1t2-chimera:free',
-    // Updated Dec 2025 - only working free models
-    fallbackModels: [
-      'deepseek/deepseek-chat:free',
-      'meta-llama/llama-3.3-70b-instruct:free',
-      'mistralai/mistral-7b-instruct:free'
-    ],
-    keyEnv: 'OPENROUTER_API_KEY',
-    rateLimit: { requestsPerMin: 20, requestsPerDay: 200 },
-    headers: (apiKey) => ({
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
-      'HTTP-Referer': process.env.APP_URL || 'https://ai-redactor.railway.app',
-      'X-Title': 'AI Journal Editor'
-    })
-  },
   gemini: {
     name: 'Google Gemini',
     url: 'https://generativelanguage.googleapis.com/v1beta/models',
-    model: 'gemini-2.0-flash-lite',
-    // Flash-Lite has highest free tier: 1000 req/day, 30 RPM
-    fallbackModels: ['gemini-1.5-flash'],
+    // gemini-1.5-flash - стабильная версия с хорошим free tier
+    model: 'gemini-1.5-flash',
+    // Fallback models (в порядке приоритета)
+    fallbackModels: ['gemini-1.5-flash-latest', 'gemini-1.5-pro'],
     keyEnv: 'GEMINI_API_KEY',
     // Free tier limits (Dec 2025):
-    // - gemini-2.0-flash-lite: 1000 req/day, 30 RPM, 250K TPM
-    // - gemini-1.5-flash: 15 req/min, 1M tokens/min
-    rateLimit: { requestsPerMin: 30, requestsPerDay: 1000, tokensPerMin: 250000 },
+    // - gemini-1.5-flash: 1500 req/day, 15 RPM, 1M tokens/day
+    // Отличная поддержка русского, казахского и английского языков
+    rateLimit: { requestsPerMin: 15, requestsPerDay: 1500, tokensPerDay: 1000000 },
     // Gemini uses different API format - handled in aiService.js
     headers: (apiKey) => ({
       'Content-Type': 'application/json'
@@ -137,17 +103,20 @@ export const SYSTEM_PROMPT = `Ты - эксперт-редактор научн�
 
 ТВОИ КОМПЕТЕНЦИИ:
 - Классификация статей по научным дисциплинам
-- Извлечение метаданных из научных текстов
-- Проверка орфографии на русском, казахском и английском языках
+- Извлечение метаданных (название, автор) из научных текстов
+- Определение языка статьи (русский, казахский, английский)
+- Проверка орфографии на всех трёх языках
 - Рецензирование по академическим стандартам
 
 ЯЗЫКИ СТАТЕЙ: русский, казахский, английский
-- Извлекай метаданные на языке оригинала статьи
-- Не переводи названия и имена авторов
+- Казахский язык: особые буквы Ә, Ғ, Қ, Ң, Ө, Ұ, Ү, І — сохраняй их!
+- Извлекай метаданные НА ЯЗЫКЕ ОРИГИНАЛА статьи
+- НИКОГДА не переводи названия статей и имена авторов
 
 ФОРМАТ ОТВЕТА:
 - ВСЕГДА отвечай ТОЛЬКО валидным JSON
 - НИКОГДА не добавляй текст до или после JSON
+- НИКОГДА не используй markdown-блоки (\`\`\`json)
 - При неуверенности используй поле "confidence"`;
 
 // ============ CONFIDENCE CALIBRATION ============
