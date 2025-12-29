@@ -125,8 +125,17 @@ const updateMetrics = (responseTime, isError = false) => {
   metrics.avgResponseTime = (metrics.avgResponseTime * (metrics.totalRequests - 1) + responseTime) / metrics.totalRequests;
 };
 
-// Get Gemini provider (единственный провайдер)
+// Get active provider (OpenRouter PRIMARY -> Groq -> Gemini)
 const getActiveProvider = () => {
+  // Priority 1: OpenRouter (DeepSeek - лучший для JSON и инструкций)
+  if (process.env.OPENROUTER_API_KEY && !checkOpenRouterDailyLimit()) {
+    return { provider: PROVIDERS.openrouter, apiKey: process.env.OPENROUTER_API_KEY };
+  }
+  // Priority 2: Groq (fast, 100K TPD)
+  if (process.env.GROQ_API_KEY && !checkGroqDailyLimit()) {
+    return { provider: PROVIDERS.groq, apiKey: process.env.GROQ_API_KEY };
+  }
+  // Priority 3: Gemini (backup)
   if (process.env.GEMINI_API_KEY && !checkGeminiDailyLimit()) {
     return { provider: PROVIDERS.gemini, apiKey: process.env.GEMINI_API_KEY };
   }
@@ -1639,17 +1648,28 @@ ${content.substring(0, 3500)}
 // ============ STATUS, METRICS & CACHE ============
 
 export const getStatus = () => {
+  const groqKey = process.env.GROQ_API_KEY;
+  const openrouterKey = process.env.OPENROUTER_API_KEY;
   const geminiKey = process.env.GEMINI_API_KEY;
 
   return {
-    available: !!geminiKey,
-    provider: 'Gemini 1.5 Flash',
+    available: !!(openrouterKey || groqKey || geminiKey),
+    primaryProvider: openrouterKey ? 'OpenRouter' : (groqKey ? 'Groq' : (geminiKey ? 'Gemini' : null)),
+    fallbackProvider: openrouterKey && groqKey ? 'Groq' : (groqKey && geminiKey ? 'Gemini' : null),
+    openrouter: {
+      configured: !!openrouterKey,
+      model: PROVIDERS.openrouter?.model || 'deepseek',
+      rateLimit: '200 req/day'
+    },
+    groq: {
+      configured: !!groqKey,
+      model: PROVIDERS.groq?.model || 'llama-3.3-70b',
+      rateLimit: '30 req/min'
+    },
     gemini: {
       configured: !!geminiKey,
-      model: PROVIDERS.gemini.model,
-      rateLimit: '15 req/min, 1500 req/day',
-      requestsToday: geminiRequestsToday,
-      dailyLimitHit: geminiDailyLimitHit
+      model: PROVIDERS.gemini?.model || 'gemini-2.0-flash-lite',
+      rateLimit: '1500 req/day'
     },
     config: {
       batchSize: BATCH_CONFIG.BATCH_SIZE,
