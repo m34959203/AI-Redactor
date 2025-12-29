@@ -1,10 +1,16 @@
 /**
- * AI Service - Gemini 1.5 Flash Integration
- * Единственный провайдер: Google Gemini 1.5 Flash
- * - Стабильная версия с хорошим free tier
- * - Отличная поддержка русского, казахского и английского языков
- * - Free tier: 1500 req/day, 1M tokens/day
- * - Paid tier: $0.075/1M input, $0.30/1M output
+ * AI Service - Multi-Provider Architecture
+ * Приоритет провайдеров: OpenRouter → Groq → Gemini
+ *
+ * Провайдеры:
+ * 1. OpenRouter (DeepSeek) - лучший для JSON и инструкций, 200 req/day
+ * 2. Groq (Llama 3.3 70B) - быстрый, 100K tokens/day
+ * 3. Gemini (Flash) - backup, 1500 req/day
+ *
+ * Особенности:
+ * - Автоматическое переключение при ошибках
+ * - 100% анализ контента (без обрезки)
+ * - Поддержка русского, казахского и английского языков
  */
 
 import crypto from 'crypto';
@@ -28,12 +34,14 @@ const PROMPT_VERSION = 'v2.1'; // Increment when prompts change
 let metrics = {
   totalRequests: 0,
   cacheHits: 0,
+  openrouterRequests: 0,
+  groqRequests: 0,
   geminiRequests: 0,
   errors: 0,
   lastRequestTime: null,
   avgResponseTime: 0,
   promptVersion: PROMPT_VERSION,
-  provider: 'Gemini 1.5 Flash'
+  activeProvider: 'OpenRouter'
 };
 
 // ============ CONFIDENCE ANALYTICS ============
@@ -256,17 +264,26 @@ const isProviderExhausted = () => {
 
 // Get provider status for user notification
 export const getProvidersStatus = () => ({
+  openrouter: {
+    configured: !!process.env.OPENROUTER_API_KEY,
+    exhausted: checkOpenRouterDailyLimit(),
+    requestsToday: openrouterRequestsToday,
+    dailyLimit: 200
+  },
+  groq: {
+    configured: !!process.env.GROQ_API_KEY,
+    exhausted: checkGroqDailyLimit()
+  },
   gemini: {
     configured: !!process.env.GEMINI_API_KEY,
     exhausted: checkGeminiDailyLimit(),
     requestsToday: geminiRequestsToday,
-    dailyLimit: 1500,
-    resetTime: geminiDailyLimitHit ? new Date(geminiDailyLimitResetTime).toISOString() : null
+    dailyLimit: 1500
   },
-  provider: 'Gemini 1.5 Flash',
-  allExhausted: isProviderExhausted(),
-  message: isProviderExhausted()
-    ? 'Лимит Gemini API исчерпан. Попробуйте позже или перейдите на платный тариф Google AI.'
+  activeProvider: getActiveProvider()?.provider?.name || 'none',
+  allExhausted: areAllProvidersExhausted(),
+  message: areAllProvidersExhausted()
+    ? 'Все AI провайдеры исчерпаны. Попробуйте позже или добавьте дополнительные API ключи.'
     : null
 });
 
