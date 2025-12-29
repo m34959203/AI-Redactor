@@ -1,10 +1,10 @@
 /**
- * AI Service - Gemini 2.5 Flash Integration
- * Единственный провайдер: Google Gemini 2.5 Flash
- * - Оптимальное соотношение цена/качество
+ * AI Service - Gemini 1.5 Flash Integration
+ * Единственный провайдер: Google Gemini 1.5 Flash
+ * - Стабильная версия с хорошим free tier
  * - Отличная поддержка русского, казахского и английского языков
- * - Free tier: 1500 req/day, 1.5M tokens/day
- * - Paid tier: $0.30/1M input, $2.50/1M output
+ * - Free tier: 1500 req/day, 1M tokens/day
+ * - Paid tier: $0.075/1M input, $0.30/1M output
  */
 
 import crypto from 'crypto';
@@ -33,7 +33,7 @@ let metrics = {
   lastRequestTime: null,
   avgResponseTime: 0,
   promptVersion: PROMPT_VERSION,
-  provider: 'Gemini 2.5 Flash'
+  provider: 'Gemini 1.5 Flash'
 };
 
 // ============ CONFIDENCE ANALYTICS ============
@@ -254,7 +254,7 @@ export const getProvidersStatus = () => ({
     dailyLimit: 1500,
     resetTime: geminiDailyLimitHit ? new Date(geminiDailyLimitResetTime).toISOString() : null
   },
-  provider: 'Gemini 2.5 Flash',
+  provider: 'Gemini 1.5 Flash',
   allExhausted: isProviderExhausted(),
   message: isProviderExhausted()
     ? 'Лимит Gemini API исчерпан. Попробуйте позже или перейдите на платный тариф Google AI.'
@@ -1643,7 +1643,7 @@ export const getStatus = () => {
 
   return {
     available: !!geminiKey,
-    provider: 'Gemini 2.5 Flash',
+    provider: 'Gemini 1.5 Flash',
     gemini: {
       configured: !!geminiKey,
       model: PROVIDERS.gemini.model,
@@ -1706,7 +1706,7 @@ export const healthCheck = async () => {
 
   return {
     status: healthy ? 'healthy' : (status.available ? 'degraded' : 'unavailable'),
-    provider: 'Gemini 2.5 Flash',
+    provider: 'Gemini 1.5 Flash',
     model: PROVIDERS.gemini.model,
     cache: { size: cache.size, maxSize: CACHE_CONFIG.MAX_SIZE },
     uptime: process.uptime(),

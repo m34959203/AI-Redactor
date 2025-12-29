@@ -59,21 +59,22 @@ export const CACHE_CONFIG = {
 };
 
 // ============ PROVIDERS ============
-// Gemini 2.5 Flash - единственный провайдер (оптимальное соотношение цена/качество)
-// Free tier: 1500 req/day, 15 RPM, 1.5M tokens/day
-// Paid tier: $0.30/1M input, $2.50/1M output
+// Gemini 1.5 Flash - единственный провайдер (стабильная версия с хорошим free tier)
+// Free tier: 1500 req/day, 15 RPM, 1M tokens/day
+// Paid tier: $0.075/1M input, $0.30/1M output
 export const PROVIDERS = {
   gemini: {
     name: 'Google Gemini',
     url: 'https://generativelanguage.googleapis.com/v1beta/models',
-    model: 'gemini-2.5-flash-preview-05-20',
-    // Fallback to stable version if preview unavailable
-    fallbackModels: ['gemini-2.0-flash', 'gemini-1.5-flash'],
+    // gemini-1.5-flash - стабильная версия с хорошим free tier
+    model: 'gemini-1.5-flash',
+    // Fallback models (в порядке приоритета)
+    fallbackModels: ['gemini-1.5-flash-latest', 'gemini-1.5-pro'],
     keyEnv: 'GEMINI_API_KEY',
     // Free tier limits (Dec 2025):
-    // - gemini-2.5-flash: 1500 req/day, 15 RPM, 1.5M tokens/day
+    // - gemini-1.5-flash: 1500 req/day, 15 RPM, 1M tokens/day
     // Отличная поддержка русского, казахского и английского языков
-    rateLimit: { requestsPerMin: 15, requestsPerDay: 1500, tokensPerDay: 1500000 },
+    rateLimit: { requestsPerMin: 15, requestsPerDay: 1500, tokensPerDay: 1000000 },
     // Gemini uses different API format - handled in aiService.js
     headers: (apiKey) => ({
       'Content-Type': 'application/json'
