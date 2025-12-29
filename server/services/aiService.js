@@ -1,8 +1,10 @@
 /**
- * AI Service - Multi-provider API integration
- * Primary: Google Gemini (1000 req/day free, best for Kazakh/Russian)
- * Fallback 1: Groq (fast, 100K TPD free)
- * Fallback 2: OpenRouter (200 req/day free)
+ * AI Service - Gemini 2.5 Flash Integration
+ * Единственный провайдер: Google Gemini 2.5 Flash
+ * - Оптимальное соотношение цена/качество
+ * - Отличная поддержка русского, казахского и английского языков
+ * - Free tier: 1500 req/day, 1.5M tokens/day
+ * - Paid tier: $0.30/1M input, $2.50/1M output
  */
 
 import crypto from 'crypto';
@@ -26,14 +28,12 @@ const PROMPT_VERSION = 'v2.1'; // Increment when prompts change
 let metrics = {
   totalRequests: 0,
   cacheHits: 0,
-  groqRequests: 0,
-  openrouterRequests: 0,
   geminiRequests: 0,
-  fallbackCount: 0,
   errors: 0,
   lastRequestTime: null,
   avgResponseTime: 0,
-  promptVersion: PROMPT_VERSION
+  promptVersion: PROMPT_VERSION,
+  provider: 'Gemini 2.5 Flash'
 };
 
 // ============ CONFIDENCE ANALYTICS ============
@@ -115,32 +115,20 @@ const logRequest = (taskType, prompt, response, metadata = {}) => {
   }
 };
 
-const updateMetrics = (provider, responseTime, isError = false) => {
+const updateMetrics = (responseTime, isError = false) => {
   metrics.totalRequests++;
+  metrics.geminiRequests++;
   metrics.lastRequestTime = new Date().toISOString();
-
-  if (provider === 'Groq') metrics.groqRequests++;
-  if (provider === 'OpenRouter') metrics.openrouterRequests++;
-  if (provider === 'Google Gemini') metrics.geminiRequests++;
   if (isError) metrics.errors++;
 
   // Running average of response time
   metrics.avgResponseTime = (metrics.avgResponseTime * (metrics.totalRequests - 1) + responseTime) / metrics.totalRequests;
 };
 
-// Get active provider (Gemini PRIMARY -> Groq -> OpenRouter)
+// Get Gemini provider (единственный провайдер)
 const getActiveProvider = () => {
-  // Priority 1: Gemini (1000 req/day - highest free limit, best for Kazakh/Russian)
   if (process.env.GEMINI_API_KEY && !checkGeminiDailyLimit()) {
     return { provider: PROVIDERS.gemini, apiKey: process.env.GEMINI_API_KEY };
-  }
-  // Priority 2: Groq (fast, 100K TPD)
-  if (process.env.GROQ_API_KEY && !checkGroqDailyLimit()) {
-    return { provider: PROVIDERS.groq, apiKey: process.env.GROQ_API_KEY };
-  }
-  // Priority 3: OpenRouter (200 req/day)
-  if (process.env.OPENROUTER_API_KEY && !checkOpenRouterDailyLimit()) {
-    return { provider: PROVIDERS.openrouter, apiKey: process.env.OPENROUTER_API_KEY };
   }
   return null;
 };
@@ -212,55 +200,26 @@ const requestQueue = new RequestQueue();
 
 let lastRequestTime = 0;
 let consecutiveErrors = 0;
-let currentProviderName = null;
 
-// Track Groq daily limit (100K TPD on free tier)
-// When hit, switch all requests to OpenRouter until reset
-let groqDailyLimitHit = false;
-let groqDailyLimitResetTime = 0;
-
-// Track OpenRouter daily limit (200 req/day on free tier)
-let openrouterDailyLimitHit = false;
-let openrouterDailyLimitResetTime = 0;
-
-// Track Gemini daily limit (1000 req/day on free tier)
+// Track Gemini daily limit (1500 req/day on free tier)
 let geminiDailyLimitHit = false;
 let geminiDailyLimitResetTime = 0;
-
-const checkGroqDailyLimit = () => {
-  // Reset if 1 hour has passed since limit was hit
-  if (groqDailyLimitHit && Date.now() > groqDailyLimitResetTime) {
-    console.log('Groq daily limit reset - trying Groq again');
-    groqDailyLimitHit = false;
-  }
-  return groqDailyLimitHit;
-};
-
-const setGroqDailyLimitHit = () => {
-  groqDailyLimitHit = true;
-  // Reset after 1 hour (Groq resets daily, but we try again after 1h)
-  groqDailyLimitResetTime = Date.now() + 60 * 60 * 1000;
-  console.log('Groq daily limit hit - switching to OpenRouter for 1 hour');
-};
-
-const checkOpenRouterDailyLimit = () => {
-  if (openrouterDailyLimitHit && Date.now() > openrouterDailyLimitResetTime) {
-    console.log('OpenRouter daily limit reset - trying OpenRouter again');
-    openrouterDailyLimitHit = false;
-  }
-  return openrouterDailyLimitHit;
-};
-
-const setOpenRouterDailyLimitHit = () => {
-  openrouterDailyLimitHit = true;
-  // Reset after 1 hour
-  openrouterDailyLimitResetTime = Date.now() + 60 * 60 * 1000;
-  console.log('OpenRouter daily limit hit');
-};
+let geminiRequestsToday = 0;
+let geminiRequestsResetDate = new Date().toDateString();
 
 const checkGeminiDailyLimit = () => {
+  // Reset counter if new day
+  const today = new Date().toDateString();
+  if (today !== geminiRequestsResetDate) {
+    geminiRequestsToday = 0;
+    geminiRequestsResetDate = today;
+    geminiDailyLimitHit = false;
+    console.log('Gemini daily counter reset - new day');
+  }
+
+  // Reset if 1 hour has passed since limit was hit
   if (geminiDailyLimitHit && Date.now() > geminiDailyLimitResetTime) {
-    console.log('Gemini daily limit reset - trying Gemini again');
+    console.log('Gemini daily limit reset - trying again');
     geminiDailyLimitHit = false;
   }
   return geminiDailyLimitHit;
@@ -270,61 +229,55 @@ const setGeminiDailyLimitHit = () => {
   geminiDailyLimitHit = true;
   // Reset after 1 hour
   geminiDailyLimitResetTime = Date.now() + 60 * 60 * 1000;
-  console.log('Gemini daily limit hit');
+  console.log('Gemini daily limit hit - waiting 1 hour');
 };
 
-// Check if ALL free AI providers are exhausted
-const areAllProvidersExhausted = () => {
-  const groqExhausted = !process.env.GROQ_API_KEY || checkGroqDailyLimit();
-  const openrouterExhausted = !process.env.OPENROUTER_API_KEY || checkOpenRouterDailyLimit();
-  const geminiExhausted = !process.env.GEMINI_API_KEY || checkGeminiDailyLimit();
-  return groqExhausted && openrouterExhausted && geminiExhausted;
+const incrementGeminiRequests = () => {
+  geminiRequestsToday++;
+  // Warn when approaching limit
+  if (geminiRequestsToday >= 1400) {
+    console.warn(`Gemini requests today: ${geminiRequestsToday}/1500 - approaching limit`);
+  }
 };
 
-// Get exhausted providers status for user notification
+// Check if Gemini provider is exhausted
+const isProviderExhausted = () => {
+  return !process.env.GEMINI_API_KEY || checkGeminiDailyLimit();
+};
+
+// Get provider status for user notification
 export const getProvidersStatus = () => ({
-  groq: {
-    configured: !!process.env.GROQ_API_KEY,
-    exhausted: checkGroqDailyLimit(),
-    resetTime: groqDailyLimitHit ? new Date(groqDailyLimitResetTime).toISOString() : null
-  },
-  openrouter: {
-    configured: !!process.env.OPENROUTER_API_KEY,
-    exhausted: checkOpenRouterDailyLimit(),
-    resetTime: openrouterDailyLimitHit ? new Date(openrouterDailyLimitResetTime).toISOString() : null
-  },
   gemini: {
     configured: !!process.env.GEMINI_API_KEY,
     exhausted: checkGeminiDailyLimit(),
+    requestsToday: geminiRequestsToday,
+    dailyLimit: 1500,
     resetTime: geminiDailyLimitHit ? new Date(geminiDailyLimitResetTime).toISOString() : null
   },
-  allExhausted: areAllProvidersExhausted(),
-  message: areAllProvidersExhausted()
-    ? 'Лимиты бесплатных AI-моделей исчерпаны. Рекомендуется перейти на платный тариф Groq, OpenRouter или Google AI.'
+  provider: 'Gemini 2.5 Flash',
+  allExhausted: isProviderExhausted(),
+  message: isProviderExhausted()
+    ? 'Лимит Gemini API исчерпан. Попробуйте позже или перейдите на платный тариф Google AI.'
     : null
 });
 
-const waitForRateLimit = async (providerName, taskType = 'general') => {
+const waitForRateLimit = async (taskType = 'general') => {
   const now = Date.now();
 
-  // Use longer delay for spelling checks to conserve TPM
+  // Determine delay based on task type and error state
   let baseDelay;
   if (consecutiveErrors > 0) {
     baseDelay = RATE_LIMIT_CONFIG.DELAY_AFTER_429;
   } else if (taskType === 'spelling') {
-    baseDelay = RATE_LIMIT_CONFIG.SPELLING_DELAY || RATE_LIMIT_CONFIG.GROQ_DELAY;
-  } else if (providerName === 'groq') {
-    baseDelay = RATE_LIMIT_CONFIG.GROQ_DELAY;
-  } else if (providerName === 'gemini' || providerName === 'google gemini') {
-    baseDelay = RATE_LIMIT_CONFIG.GEMINI_DELAY;
+    baseDelay = RATE_LIMIT_CONFIG.SPELLING_DELAY;
   } else {
-    baseDelay = RATE_LIMIT_CONFIG.OPENROUTER_DELAY;
+    baseDelay = RATE_LIMIT_CONFIG.GEMINI_DELAY;
   }
 
   const timeSinceLastRequest = now - lastRequestTime;
   if (timeSinceLastRequest < baseDelay) {
     const waitTime = baseDelay - timeSinceLastRequest;
-    console.log(`Rate limiting (${providerName}/${taskType}): waiting ${waitTime}ms...`);
+    console.log(`Rate limiting (Gemini/${taskType}): waiting ${waitTime}ms...`);
     await new Promise(resolve => setTimeout(resolve, waitTime));
   }
   lastRequestTime = Date.now();
@@ -600,34 +553,6 @@ const safeJsonParse = (jsonString, fallback = {}) => {
   }
 };
 
-// ============ RATE LIMIT ERROR PARSING ============
-
-const parseRateLimitError = (errorMessage, providerName) => {
-  const msg = errorMessage?.toLowerCase() || '';
-
-  if (msg.includes('per-day') || msg.includes('per day') || msg.includes('daily')) {
-    return {
-      type: 'daily',
-      message: providerName === 'groq'
-        ? 'Дневной лимит Groq исчерпан'
-        : 'Дневной лимит OpenRouter исчерпан (200 запросов/день)',
-      suggestion: 'Переключение на резервный провайдер...'
-    };
-  }
-
-  if (msg.includes('per-min') || msg.includes('per minute') || msg.includes('rate_limit')) {
-    return {
-      type: 'minute',
-      message: providerName === 'groq'
-        ? 'Превышен лимит Groq (30 запросов/мин)'
-        : 'Превышен лимит OpenRouter (20 запросов/мин)',
-      suggestion: 'Подождите минуту или используйте резервный провайдер'
-    };
-  }
-
-  return { type: 'unknown', message: 'Лимит запросов исчерпан', suggestion: 'Попробуйте позже' };
-};
-
 // ============ GEMINI API HELPER ============
 // Gemini uses different API format than OpenAI-compatible APIs
 
@@ -676,277 +601,94 @@ const makeGeminiRequest = async (prompt, maxTokens, apiKey, model) => {
   return { error: false, content };
 };
 
-// ============ CORE AI REQUEST ============
+// ============ CORE AI REQUEST (Gemini Only) ============
 
 const makeAIRequest = async (prompt, maxTokens = 1000, taskType = 'general', options = {}) => {
-  const { forceFallback = false, forceGemini = false, forceProvider = null, retryCount = 0, modelIndex = 0 } = options;
+  const { retryCount = 0, modelIndex = 0 } = options;
+  const startTime = Date.now();
 
-  // Check if all providers are exhausted BEFORE making request
-  if (areAllProvidersExhausted()) {
-    console.error('ALL_PROVIDERS_EXHAUSTED: All AI provider daily limits reached');
-    throw new Error('ALL_PROVIDERS_EXHAUSTED|Лимиты бесплатных AI-моделей исчерпаны|Рекомендуется перейти на платный тариф Groq, OpenRouter или Google AI');
+  // Check if Gemini is exhausted
+  if (isProviderExhausted()) {
+    console.error('GEMINI_EXHAUSTED: Gemini API daily limit reached');
+    throw new Error('PROVIDER_EXHAUSTED|Лимит Gemini API исчерпан|Попробуйте позже или перейдите на платный тариф');
   }
 
-  // Get provider
-  let activeConfig = getActiveProvider();
-
-  // Force specific provider if requested
-  if (forceProvider === 'groq' && process.env.GROQ_API_KEY) {
-    activeConfig = { provider: PROVIDERS.groq, apiKey: process.env.GROQ_API_KEY };
-  } else if (forceProvider === 'openrouter' && process.env.OPENROUTER_API_KEY) {
-    activeConfig = { provider: PROVIDERS.openrouter, apiKey: process.env.OPENROUTER_API_KEY };
-  } else if (forceProvider === 'gemini' && process.env.GEMINI_API_KEY) {
-    activeConfig = { provider: PROVIDERS.gemini, apiKey: process.env.GEMINI_API_KEY };
-  }
-
-  // Force OpenRouter fallback if requested (but check if it's exhausted)
-  if (forceFallback && process.env.OPENROUTER_API_KEY && !checkOpenRouterDailyLimit()) {
-    activeConfig = { provider: PROVIDERS.openrouter, apiKey: process.env.OPENROUTER_API_KEY };
-  }
-
-  // Force Gemini if requested (but check if it's exhausted)
-  if (forceGemini && process.env.GEMINI_API_KEY && !checkGeminiDailyLimit()) {
-    activeConfig = { provider: PROVIDERS.gemini, apiKey: process.env.GEMINI_API_KEY };
-  }
-
+  // Get Gemini provider
+  const activeConfig = getActiveProvider();
   if (!activeConfig) {
-    console.error('AI Request Error: No API key configured');
-    throw new Error('API_KEY_MISSING');
+    console.error('AI Request Error: GEMINI_API_KEY not configured');
+    throw new Error('API_KEY_MISSING|Ключ GEMINI_API_KEY не настроен|Добавьте GEMINI_API_KEY в переменные окружения');
   }
 
   const { provider, apiKey } = activeConfig;
-  currentProviderName = provider.name.toLowerCase();
 
-  // Pass taskType to use appropriate delay (spelling gets longer delay)
-  await waitForRateLimit(currentProviderName, taskType);
+  // Wait for rate limit
+  await waitForRateLimit(taskType);
 
-  // Select model
+  // Select model (with fallbacks)
   const allModels = [provider.model, ...provider.fallbackModels];
-  let effectiveModelIndex = modelIndex;
-
-  const model = allModels[Math.min(effectiveModelIndex, allModels.length - 1)];
+  const model = allModels[Math.min(modelIndex, allModels.length - 1)];
   const isLastModel = modelIndex >= allModels.length - 1;
 
-  console.log(`AI Request: provider=${provider.name}, model=${model}, task=${taskType}, retry=${retryCount}`);
+  console.log(`AI Request: provider=Gemini, model=${model}, task=${taskType}, retry=${retryCount}`);
 
   try {
-    // Special handling for Gemini (different API format)
-    if (provider.name === 'Google Gemini') {
-      const geminiResult = await makeGeminiRequest(prompt, maxTokens, apiKey, model);
+    const geminiResult = await makeGeminiRequest(prompt, maxTokens, apiKey, model);
 
-      if (geminiResult.error) {
-        console.error(`Gemini Request Failed: status=${geminiResult.status}, error=${geminiResult.message}`);
+    if (geminiResult.error) {
+      console.error(`Gemini Request Failed: status=${geminiResult.status}, error=${geminiResult.message}`);
 
-        // Handle quota exceeded - mark limit hit and try fallback
-        if (geminiResult.isQuotaExceeded || geminiResult.status === 429) {
-          setGeminiDailyLimitHit();
-
-          // Try Groq as fallback
-          if (process.env.GROQ_API_KEY && !checkGroqDailyLimit()) {
-            console.log('Gemini quota exceeded, falling back to Groq...');
-            return makeAIRequest(prompt, maxTokens, taskType, { forceProvider: 'groq', ...options });
-          }
-
-          // Try OpenRouter as last fallback
-          if (process.env.OPENROUTER_API_KEY && !checkOpenRouterDailyLimit()) {
-            console.log('Gemini quota exceeded, falling back to OpenRouter...');
-            return makeAIRequest(prompt, maxTokens, taskType, { forceProvider: 'openrouter', ...options });
-          }
-
-          // All providers exhausted
-          throw new Error('ALL_PROVIDERS_EXHAUSTED|Лимиты бесплатных AI-моделей исчерпаны|Рекомендуется перейти на платный тариф');
-        }
-
-        throw new Error(`Gemini API error: ${geminiResult.message}`);
-      }
-
-      consecutiveErrors = 0;
-      console.log(`AI Request Success: provider=Google Gemini, model=${model}`);
-      return geminiResult.content;
-    }
-
-    // OpenAI-compatible API (Groq, OpenRouter)
-    const response = await fetch(provider.url, {
-      method: 'POST',
-      headers: provider.headers(apiKey),
-      body: JSON.stringify({
-        model,
-        max_tokens: maxTokens,
-        messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
-          { role: 'user', content: prompt }
-        ]
-      })
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      const errorMessage = errorData.error?.message || response.statusText;
-      console.error(`AI Request Failed: status=${response.status}, provider=${provider.name}, error=${errorMessage}`);
-
-      // Handle 401 - Invalid API key
-      if (response.status === 401) {
-        // Try fallback provider
-        if (provider.name === 'Groq' && process.env.OPENROUTER_API_KEY) {
-          console.log('Groq API key invalid, trying OpenRouter fallback...');
-          return makeAIRequest(prompt, maxTokens, taskType, { forceFallback: true });
-        }
-        throw new Error('API_KEY_INVALID');
-      }
-
-      // Handle 429 - Rate limit
-      if (response.status === 429) {
+      // Handle quota exceeded
+      if (geminiResult.isQuotaExceeded || geminiResult.status === 429) {
         consecutiveErrors++;
-        const rateLimitInfo = parseRateLimitError(errorMessage, provider.name.toLowerCase());
-        console.warn(`Rate limit (${provider.name}): ${rateLimitInfo.type}`);
-
-        // CRITICAL: If Groq daily limit (TPD) hit, remember it for future requests
-        if (rateLimitInfo.type === 'daily' && provider.name === 'Groq') {
-          setGroqDailyLimitHit();
-          // Switch to OpenRouter immediately for this and all future requests
-          if (process.env.OPENROUTER_API_KEY && !checkOpenRouterDailyLimit()) {
-            console.log('Groq daily limit - switching to OpenRouter...');
-            return makeAIRequest(prompt, maxTokens, taskType, { forceFallback: true });
-          }
-          // Try Gemini if OpenRouter also exhausted
-          if (process.env.GEMINI_API_KEY && !checkGeminiDailyLimit()) {
-            console.log('Groq daily limit - switching to Gemini...');
-            return makeAIRequest(prompt, maxTokens, taskType, { forceGemini: true });
-          }
-        }
-
-        // CRITICAL: If OpenRouter daily limit hit, remember it
-        if (rateLimitInfo.type === 'daily' && provider.name === 'OpenRouter') {
-          setOpenRouterDailyLimitHit();
-          // Try Gemini if available and not exhausted
-          if (process.env.GEMINI_API_KEY && !checkGeminiDailyLimit()) {
-            console.log('OpenRouter daily limit - switching to Gemini...');
-            return makeAIRequest(prompt, maxTokens, taskType, { forceGemini: true });
-          }
-          // Try Groq if available and not exhausted
-          if (process.env.GROQ_API_KEY && !checkGroqDailyLimit()) {
-            console.log('OpenRouter daily limit - switching to Groq...');
-            return makeAIRequest(prompt, maxTokens, taskType, { forceFallback: false });
-          }
-          // All exhausted - throw special error
-          throw new Error('ALL_PROVIDERS_EXHAUSTED|Лимиты бесплатных AI-моделей исчерпаны|Рекомендуется перейти на платный тариф');
-        }
-
-        // Try next model in same provider (only for TPM limits, not daily)
-        if (!isLastModel && rateLimitInfo.type !== 'daily') {
-          console.log(`Trying fallback model: ${allModels[modelIndex + 1]}`);
-          await new Promise(r => setTimeout(r, 3000));
-          return makeAIRequest(prompt, maxTokens, taskType, { ...options, modelIndex: modelIndex + 1, retryCount: 0 });
-        }
-
-        // Try other provider (Groq -> OpenRouter -> Gemini)
-        if (provider.name === 'Groq') {
-          if (process.env.OPENROUTER_API_KEY && !checkOpenRouterDailyLimit()) {
-            console.log('Groq rate limited, switching to OpenRouter...');
-            await new Promise(r => setTimeout(r, 2000));
-            return makeAIRequest(prompt, maxTokens, taskType, { forceFallback: true });
-          }
-          if (process.env.GEMINI_API_KEY && !checkGeminiDailyLimit()) {
-            console.log('Groq rate limited, switching to Gemini...');
-            await new Promise(r => setTimeout(r, 2000));
-            return makeAIRequest(prompt, maxTokens, taskType, { forceGemini: true });
-          }
-        }
-        if (provider.name === 'OpenRouter' && process.env.GEMINI_API_KEY && !checkGeminiDailyLimit()) {
-          console.log('OpenRouter rate limited, switching to Gemini...');
-          await new Promise(r => setTimeout(r, 2000));
-          return makeAIRequest(prompt, maxTokens, taskType, { forceGemini: true });
-        }
-
-        // Retry with backoff
-        if (retryCount < 2) {
-          const backoff = Math.pow(2, retryCount + 1) * 3000;
-          console.log(`Retrying in ${backoff}ms...`);
-          await new Promise(r => setTimeout(r, backoff));
-          return makeAIRequest(prompt, maxTokens, taskType, { ...options, retryCount: retryCount + 1 });
-        }
-
-        throw new Error(`RATE_LIMIT|${rateLimitInfo.message}|${rateLimitInfo.suggestion}`);
+        setGeminiDailyLimitHit();
+        throw new Error('PROVIDER_EXHAUSTED|Лимит Gemini API исчерпан|Попробуйте позже или перейдите на платный тариф');
       }
 
-      // Handle 404/400 - Model not available
-      if (response.status === 404 || response.status === 400) {
-        if (!isLastModel) {
-          console.log(`Model ${model} unavailable, trying ${allModels[modelIndex + 1]}`);
-          await new Promise(r => setTimeout(r, 1000));
-          return makeAIRequest(prompt, maxTokens, taskType, { ...options, modelIndex: modelIndex + 1 });
-        }
-        // Try other provider (Groq -> OpenRouter -> Gemini)
-        if (provider.name === 'Groq') {
-          if (process.env.OPENROUTER_API_KEY && !checkOpenRouterDailyLimit()) {
-            console.log('All Groq models unavailable, switching to OpenRouter...');
-            return makeAIRequest(prompt, maxTokens, taskType, { forceFallback: true });
-          }
-          if (process.env.GEMINI_API_KEY && !checkGeminiDailyLimit()) {
-            console.log('All Groq models unavailable, switching to Gemini...');
-            return makeAIRequest(prompt, maxTokens, taskType, { forceGemini: true });
-          }
-        }
-        if (provider.name === 'OpenRouter' && process.env.GEMINI_API_KEY && !checkGeminiDailyLimit()) {
-          console.log('All OpenRouter models unavailable, switching to Gemini...');
-          return makeAIRequest(prompt, maxTokens, taskType, { forceGemini: true });
-        }
+      // Handle model not available - try fallback model
+      if ((geminiResult.status === 404 || geminiResult.status === 400) && !isLastModel) {
+        console.log(`Model ${model} unavailable, trying ${allModels[modelIndex + 1]}`);
+        await new Promise(r => setTimeout(r, 1000));
+        return makeAIRequest(prompt, maxTokens, taskType, { ...options, modelIndex: modelIndex + 1 });
       }
 
-      // Handle 5xx - Server error
-      if (response.status >= 500) {
-        if (provider.name === 'Groq') {
-          if (process.env.OPENROUTER_API_KEY && !checkOpenRouterDailyLimit()) {
-            console.log('Groq server error, switching to OpenRouter...');
-            return makeAIRequest(prompt, maxTokens, taskType, { forceFallback: true });
-          }
-          if (process.env.GEMINI_API_KEY && !checkGeminiDailyLimit()) {
-            console.log('Groq server error, switching to Gemini...');
-            return makeAIRequest(prompt, maxTokens, taskType, { forceGemini: true });
-          }
-        }
-        if (provider.name === 'OpenRouter' && process.env.GEMINI_API_KEY && !checkGeminiDailyLimit()) {
-          console.log('OpenRouter server error, switching to Gemini...');
-          return makeAIRequest(prompt, maxTokens, taskType, { forceGemini: true });
-        }
+      // Handle 5xx - retry with backoff
+      if (geminiResult.status >= 500 && retryCount < RATE_LIMIT_CONFIG.MAX_RETRIES) {
+        consecutiveErrors++;
+        const backoff = Math.pow(2, retryCount) * RATE_LIMIT_CONFIG.BACKOFF_MULTIPLIER;
+        console.log(`Server error, retrying in ${backoff}ms...`);
+        await new Promise(r => setTimeout(r, backoff));
+        return makeAIRequest(prompt, maxTokens, taskType, { ...options, retryCount: retryCount + 1 });
       }
 
-      throw new Error(`${provider.name} API error: ${errorMessage}`);
+      throw new Error(`Gemini API error: ${geminiResult.message}`);
     }
 
-    const data = await response.json();
-
-    if (!data.choices?.[0]?.message) {
-      throw new Error('Invalid API response structure');
-    }
-
+    // Success
     consecutiveErrors = 0;
-    console.log(`AI Request Success: provider=${provider.name}, model=${model}`);
-    return data.choices[0].message.content;
+    incrementGeminiRequests();
+    updateMetrics(Date.now() - startTime);
+    console.log(`AI Request Success: model=${model}, time=${Date.now() - startTime}ms`);
+    return geminiResult.content;
 
   } catch (error) {
-    if (error.message === 'API_KEY_MISSING' || error.message === 'API_KEY_INVALID') throw error;
-    if (error.message?.startsWith('RATE_LIMIT')) throw error;
-    if (error.message?.startsWith('ALL_PROVIDERS_EXHAUSTED')) throw error;
+    updateMetrics(Date.now() - startTime, true);
+
+    if (error.message?.includes('API_KEY_MISSING') ||
+        error.message?.includes('PROVIDER_EXHAUSTED')) {
+      throw error;
+    }
 
     console.error(`AI Request Exception: ${error.message}`);
 
-    // Network error - try other provider (Groq -> OpenRouter -> Gemini)
-    if (error.name === 'TypeError' || error.name === 'FetchError') {
-      if (provider.name === 'Groq') {
-        if (process.env.OPENROUTER_API_KEY && !checkOpenRouterDailyLimit()) {
-          console.log('Network error, switching to OpenRouter...');
-          return makeAIRequest(prompt, maxTokens, taskType, { forceFallback: true });
-        }
-        if (process.env.GEMINI_API_KEY && !checkGeminiDailyLimit()) {
-          console.log('Network error, switching to Gemini...');
-          return makeAIRequest(prompt, maxTokens, taskType, { forceGemini: true });
-        }
-      }
-      if (provider.name === 'OpenRouter' && process.env.GEMINI_API_KEY && !checkGeminiDailyLimit()) {
-        console.log('Network error, switching to Gemini...');
-        return makeAIRequest(prompt, maxTokens, taskType, { forceGemini: true });
-      }
+    // Network error - retry with backoff
+    if ((error.name === 'TypeError' || error.name === 'FetchError') &&
+        retryCount < RATE_LIMIT_CONFIG.MAX_RETRIES) {
+      consecutiveErrors++;
+      const backoff = Math.pow(2, retryCount) * RATE_LIMIT_CONFIG.BACKOFF_MULTIPLIER;
+      console.log(`Network error, retrying in ${backoff}ms...`);
+      await new Promise(r => setTimeout(r, backoff));
+      return makeAIRequest(prompt, maxTokens, taskType, { ...options, retryCount: retryCount + 1 });
     }
 
     throw error;
@@ -1641,7 +1383,8 @@ ${textToCheck}`;
   try {
     const maxTokens = BATCH_CONFIG.MAX_TOKENS_SPELLING || 1500;
 
-    const response = await makeAIRequest(prompt, maxTokens, 'spelling', {});
+    // Gemini отлично справляется со всеми языками (русский, казахский, английский)
+    const response = await makeAIRequest(prompt, maxTokens, 'spelling');
     const result = safeJsonParse(response, fallback);
 
     // Get AI-detected language (fallback to regex detection if AI didn't return it)
@@ -1896,22 +1639,17 @@ ${content.substring(0, 3500)}
 // ============ STATUS, METRICS & CACHE ============
 
 export const getStatus = () => {
-  const groqKey = process.env.GROQ_API_KEY;
-  const openrouterKey = process.env.OPENROUTER_API_KEY;
+  const geminiKey = process.env.GEMINI_API_KEY;
 
   return {
-    available: !!(groqKey || openrouterKey),
-    primaryProvider: groqKey ? 'Groq' : (openrouterKey ? 'OpenRouter' : null),
-    fallbackProvider: groqKey && openrouterKey ? 'OpenRouter' : null,
-    groq: {
-      configured: !!groqKey,
-      model: PROVIDERS.groq.model,
-      rateLimit: '30 req/min'
-    },
-    openrouter: {
-      configured: !!openrouterKey,
-      model: PROVIDERS.openrouter.model,
-      rateLimit: '200 req/day'
+    available: !!geminiKey,
+    provider: 'Gemini 2.5 Flash',
+    gemini: {
+      configured: !!geminiKey,
+      model: PROVIDERS.gemini.model,
+      rateLimit: '15 req/min, 1500 req/day',
+      requestsToday: geminiRequestsToday,
+      dailyLimitHit: geminiDailyLimitHit
     },
     config: {
       batchSize: BATCH_CONFIG.BATCH_SIZE,
@@ -1932,12 +1670,11 @@ export const getMetrics = () => ({
   cacheHitRate: metrics.totalRequests > 0
     ? Math.round((metrics.cacheHits / (metrics.totalRequests + metrics.cacheHits)) * 100) + '%'
     : '0%',
-  fallbackRate: metrics.totalRequests > 0
-    ? Math.round((metrics.fallbackCount / metrics.totalRequests) * 100) + '%'
-    : '0%',
   errorRate: metrics.totalRequests > 0
     ? Math.round((metrics.errors / metrics.totalRequests) * 100) + '%'
-    : '0%'
+    : '0%',
+  geminiRequestsToday,
+  geminiDailyLimitHit
 });
 
 /**
@@ -1947,23 +1684,20 @@ export const healthCheck = async () => {
   const status = getStatus();
   const startTime = Date.now();
 
-  // Quick connectivity test
+  // Quick connectivity test for Gemini
   let healthy = false;
-  let provider = null;
   let responseTime = 0;
 
   if (status.available) {
     try {
-      const activeConfig = getActiveProvider();
-      if (activeConfig) {
-        provider = activeConfig.provider.name;
-        const response = await fetch(activeConfig.provider.url.replace('/chat/completions', '/models'), {
-          method: 'GET',
-          headers: { 'Authorization': `Bearer ${activeConfig.apiKey}` }
-        });
-        healthy = response.ok;
-        responseTime = Date.now() - startTime;
-      }
+      const apiKey = process.env.GEMINI_API_KEY;
+      // Gemini models list endpoint
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`,
+        { method: 'GET' }
+      );
+      healthy = response.ok;
+      responseTime = Date.now() - startTime;
     } catch {
       healthy = false;
       responseTime = Date.now() - startTime;
@@ -1972,10 +1706,12 @@ export const healthCheck = async () => {
 
   return {
     status: healthy ? 'healthy' : (status.available ? 'degraded' : 'unavailable'),
-    provider,
+    provider: 'Gemini 2.5 Flash',
+    model: PROVIDERS.gemini.model,
+    cache: { size: cache.size, maxSize: CACHE_CONFIG.MAX_SIZE },
+    uptime: process.uptime(),
     responseTime,
-    timestamp: new Date().toISOString(),
-    metrics: getMetrics()
+    timestamp: new Date().toISOString()
   };
 };
 
