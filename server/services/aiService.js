@@ -128,19 +128,19 @@ const updateMetrics = (provider, responseTime, isError = false) => {
   metrics.avgResponseTime = (metrics.avgResponseTime * (metrics.totalRequests - 1) + responseTime) / metrics.totalRequests;
 };
 
-// Get active provider (Gemini PRIMARY -> Groq -> OpenRouter)
+// Get active provider (OpenRouter PRIMARY -> Groq -> Gemini)
 const getActiveProvider = () => {
-  // Priority 1: Gemini (1000 req/day - highest free limit, best for Kazakh/Russian)
-  if (process.env.GEMINI_API_KEY && !checkGeminiDailyLimit()) {
-    return { provider: PROVIDERS.gemini, apiKey: process.env.GEMINI_API_KEY };
+  // Priority 1: OpenRouter (DeepSeek - лучший для JSON и инструкций)
+  if (process.env.OPENROUTER_API_KEY && !checkOpenRouterDailyLimit()) {
+    return { provider: PROVIDERS.openrouter, apiKey: process.env.OPENROUTER_API_KEY };
   }
   // Priority 2: Groq (fast, 100K TPD)
   if (process.env.GROQ_API_KEY && !checkGroqDailyLimit()) {
     return { provider: PROVIDERS.groq, apiKey: process.env.GROQ_API_KEY };
   }
-  // Priority 3: OpenRouter (200 req/day)
-  if (process.env.OPENROUTER_API_KEY && !checkOpenRouterDailyLimit()) {
-    return { provider: PROVIDERS.openrouter, apiKey: process.env.OPENROUTER_API_KEY };
+  // Priority 3: Gemini (backup)
+  if (process.env.GEMINI_API_KEY && !checkGeminiDailyLimit()) {
+    return { provider: PROVIDERS.gemini, apiKey: process.env.GEMINI_API_KEY };
   }
   return null;
 };
@@ -1900,9 +1900,9 @@ export const getStatus = () => {
   const openrouterKey = process.env.OPENROUTER_API_KEY;
 
   return {
-    available: !!(groqKey || openrouterKey),
-    primaryProvider: groqKey ? 'Groq' : (openrouterKey ? 'OpenRouter' : null),
-    fallbackProvider: groqKey && openrouterKey ? 'OpenRouter' : null,
+    available: !!(openrouterKey || groqKey),
+    primaryProvider: openrouterKey ? 'OpenRouter' : (groqKey ? 'Groq' : null),
+    fallbackProvider: openrouterKey && groqKey ? 'Groq' : null,
     groq: {
       configured: !!groqKey,
       model: PROVIDERS.groq.model,
