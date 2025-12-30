@@ -65,8 +65,8 @@ export const PROVIDERS = {
   gemini: {
     name: 'Google Gemini',
     url: 'https://generativelanguage.googleapis.com/v1beta/models',
-    model: 'gemini-1.5-flash',
-    fallbackModels: ['gemini-1.5-flash-latest', 'gemini-1.5-pro'],
+    model: 'gemini-2.0-flash',
+    fallbackModels: ['gemini-2.0-flash-exp', 'gemini-1.5-pro-latest'],
     keyEnv: 'GEMINI_API_KEY',
     // Tier 1 (paid): 1000 req/min, 4M tokens/min
     // Free tier: 15 req/min, 1500 req/day
