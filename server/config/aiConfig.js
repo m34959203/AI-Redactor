@@ -59,25 +59,50 @@ export const CACHE_CONFIG = {
 };
 
 // ============ PROVIDERS ============
-// Gemini 1.5 Flash - единственный провайдер (стабильная версия с хорошим free tier)
-// Free tier: 1500 req/day, 15 RPM, 1M tokens/day
-// Paid tier: $0.075/1M input, $0.30/1M output
+// Приоритет: Groq → Gemini → OpenRouter
 export const PROVIDERS = {
+  // Priority 1: Groq - быстрый, хорошие лимиты
+  groq: {
+    name: 'Groq',
+    url: 'https://api.groq.com/openai/v1/chat/completions',
+    model: 'llama-3.3-70b-versatile',
+    fallbackModels: ['llama-3.1-70b-versatile', 'mixtral-8x7b-32768'],
+    keyEnv: 'GROQ_API_KEY',
+    // Free tier: 30 req/min, 14,400 req/day, 6000 tokens/min
+    rateLimit: { requestsPerMin: 30, requestsPerDay: 14400, tokensPerMin: 6000 },
+    headers: (apiKey) => ({
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`
+    })
+  },
+  // Priority 2: Gemini - надёжный с Tier 1 (после оплаты)
   gemini: {
     name: 'Google Gemini',
     url: 'https://generativelanguage.googleapis.com/v1beta/models',
-    // gemini-1.5-flash - стабильная версия с хорошим free tier
     model: 'gemini-1.5-flash',
-    // Fallback models (в порядке приоритета)
     fallbackModels: ['gemini-1.5-flash-latest', 'gemini-1.5-pro'],
     keyEnv: 'GEMINI_API_KEY',
-    // Free tier limits (Dec 2025):
-    // - gemini-1.5-flash: 1500 req/day, 15 RPM, 1M tokens/day
-    // Отличная поддержка русского, казахского и английского языков
-    rateLimit: { requestsPerMin: 15, requestsPerDay: 1500, tokensPerDay: 1000000 },
-    // Gemini uses different API format - handled in aiService.js
+    // Tier 1 (paid): 1000 req/min, 4M tokens/min
+    // Free tier: 15 req/min, 1500 req/day
+    rateLimit: { requestsPerMin: 1000, requestsPerDay: 50000, tokensPerMin: 4000000 },
     headers: (apiKey) => ({
       'Content-Type': 'application/json'
+    })
+  },
+  // Priority 3: OpenRouter - backup, множество моделей
+  openrouter: {
+    name: 'OpenRouter',
+    url: 'https://openrouter.ai/api/v1/chat/completions',
+    model: 'tngtech/deepseek-r1t2-chimera:free',
+    fallbackModels: ['deepseek/deepseek-chat:free', 'meta-llama/llama-3.1-8b-instruct:free'],
+    keyEnv: 'OPENROUTER_API_KEY',
+    // Free tier: ~200 req/day
+    rateLimit: { requestsPerMin: 20, requestsPerDay: 200 },
+    headers: (apiKey) => ({
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+      'HTTP-Referer': 'https://ai-redactor.app',
+      'X-Title': 'AI-Redactor'
     })
   }
 };
