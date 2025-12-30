@@ -1,10 +1,10 @@
 /**
  * AI Service - Multi-Provider Architecture
- * Приоритет провайдеров: Groq → Gemini → OpenRouter
+ * Приоритет провайдеров: Gemini → Groq → OpenRouter
  *
  * Провайдеры:
- * 1. Groq (Llama 3.3 70B) - быстрый, 30 req/min
- * 2. Gemini (Flash) - надёжный с оплатой, Tier 1 лимиты
+ * 1. Gemini (Flash) - надёжный с оплатой, Tier 1 лимиты
+ * 2. Groq (Llama 3.3 70B) - быстрый, 30 req/min
  * 3. OpenRouter (DeepSeek) - backup, 200 req/day free
  *
  * Особенности:
@@ -133,15 +133,15 @@ const updateMetrics = (responseTime, isError = false) => {
   metrics.avgResponseTime = (metrics.avgResponseTime * (metrics.totalRequests - 1) + responseTime) / metrics.totalRequests;
 };
 
-// Get active provider (Groq PRIMARY -> Gemini -> OpenRouter)
+// Get active provider (Gemini PRIMARY -> Groq -> OpenRouter)
 const getActiveProvider = () => {
-  // Priority 1: Groq (fast, 30 req/min)
-  if (process.env.GROQ_API_KEY && !checkGroqDailyLimit()) {
-    return { provider: PROVIDERS.groq, apiKey: process.env.GROQ_API_KEY };
-  }
-  // Priority 2: Gemini (reliable with billing, Tier 1 limits)
+  // Priority 1: Gemini (reliable with billing, Tier 1 limits)
   if (process.env.GEMINI_API_KEY && !checkGeminiDailyLimit()) {
     return { provider: PROVIDERS.gemini, apiKey: process.env.GEMINI_API_KEY };
+  }
+  // Priority 2: Groq (fast, 30 req/min)
+  if (process.env.GROQ_API_KEY && !checkGroqDailyLimit()) {
+    return { provider: PROVIDERS.groq, apiKey: process.env.GROQ_API_KEY };
   }
   // Priority 3: OpenRouter (backup, 200 req/day free)
   if (process.env.OPENROUTER_API_KEY && !checkOpenRouterDailyLimit()) {
@@ -790,7 +790,7 @@ const makeGeminiRequest = async (prompt, maxTokens, apiKey, model) => {
   return { error: false, content };
 };
 
-// ============ CORE AI REQUEST (Multi-Provider: Groq → Gemini → OpenRouter) ============
+// ============ CORE AI REQUEST (Multi-Provider: Gemini → Groq → OpenRouter) ============
 
 const makeAIRequest = async (prompt, maxTokens = 1000, taskType = 'general', options = {}) => {
   const { retryCount = 0 } = options;
@@ -1867,9 +1867,9 @@ export const getStatus = () => {
   const geminiKey = process.env.GEMINI_API_KEY;
 
   return {
-    available: !!(groqKey || geminiKey || openrouterKey),
-    primaryProvider: groqKey ? 'Groq' : (geminiKey ? 'Gemini' : (openrouterKey ? 'OpenRouter' : null)),
-    fallbackProvider: groqKey && geminiKey ? 'Gemini' : (geminiKey && openrouterKey ? 'OpenRouter' : null),
+    available: !!(geminiKey || groqKey || openrouterKey),
+    primaryProvider: geminiKey ? 'Gemini' : (groqKey ? 'Groq' : (openrouterKey ? 'OpenRouter' : null)),
+    fallbackProvider: geminiKey && groqKey ? 'Groq' : (groqKey && openrouterKey ? 'OpenRouter' : null),
     openrouter: {
       configured: !!openrouterKey,
       model: PROVIDERS.openrouter?.model || 'deepseek',

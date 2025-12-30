@@ -59,23 +59,9 @@ export const CACHE_CONFIG = {
 };
 
 // ============ PROVIDERS ============
-// Приоритет: Groq → Gemini → OpenRouter
+// Приоритет: Gemini → Groq → OpenRouter
 export const PROVIDERS = {
-  // Priority 1: Groq - быстрый, хорошие лимиты
-  groq: {
-    name: 'Groq',
-    url: 'https://api.groq.com/openai/v1/chat/completions',
-    model: 'llama-3.3-70b-versatile',
-    fallbackModels: ['llama-3.1-70b-versatile', 'mixtral-8x7b-32768'],
-    keyEnv: 'GROQ_API_KEY',
-    // Free tier: 30 req/min, 14,400 req/day, 6000 tokens/min
-    rateLimit: { requestsPerMin: 30, requestsPerDay: 14400, tokensPerMin: 6000 },
-    headers: (apiKey) => ({
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`
-    })
-  },
-  // Priority 2: Gemini - надёжный с Tier 1 (после оплаты)
+  // Priority 1: Gemini - надёжный с Tier 1 (после оплаты)
   gemini: {
     name: 'Google Gemini',
     url: 'https://generativelanguage.googleapis.com/v1beta/models',
@@ -87,6 +73,20 @@ export const PROVIDERS = {
     rateLimit: { requestsPerMin: 1000, requestsPerDay: 50000, tokensPerMin: 4000000 },
     headers: (apiKey) => ({
       'Content-Type': 'application/json'
+    })
+  },
+  // Priority 2: Groq - быстрый, хорошие лимиты
+  groq: {
+    name: 'Groq',
+    url: 'https://api.groq.com/openai/v1/chat/completions',
+    model: 'llama-3.1-8b-instant',
+    fallbackModels: ['llama-3.3-70b-versatile', 'mixtral-8x7b-32768'],
+    keyEnv: 'GROQ_API_KEY',
+    // Free tier: 30 req/min, 14400 req/day
+    rateLimit: { requestsPerMin: 30, requestsPerDay: 14400 },
+    headers: (apiKey) => ({
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`
     })
   },
   // Priority 3: OpenRouter - backup, множество моделей
