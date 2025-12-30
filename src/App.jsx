@@ -313,7 +313,7 @@ const App = () => {
 
           // Пересортируем статьи если язык изменился
           if (languageUpdated) {
-            const updatedArticles = articles.map(a => {
+            const updatedArticles = sortedArticles.map(a => {
               const result = spellCheckResults.find(r => r.fileName === a.file?.name);
               return result?.language ? { ...a, language: result.language } : a;
             });
