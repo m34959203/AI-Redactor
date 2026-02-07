@@ -355,19 +355,8 @@ const ArticlesList = ({
         </div>
       )}
 
-      <div className="mt-8 flex gap-4">
-        <button
-          onClick={onGeneratePDF}
-          disabled={isProcessing || !canGeneratePDF || !hasArticles}
-          className="flex-1 bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-8 py-4 rounded-xl font-semibold hover:from-indigo-700 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
-        >
-          <Download className="inline mr-2" size={20} />
-          {isProcessing ? 'Генерация...' : 'Сгенерировать PDF'}
-        </button>
-      </div>
-
       {!canGeneratePDF && hasArticles && (
-        <div className="mt-4">
+        <div className="mt-8">
           <Alert type="warning" title="Для генерации PDF необходимо загрузить:">
             <ul className="list-disc list-inside space-y-1">
               {missingPages.map(page => (
@@ -377,6 +366,17 @@ const ArticlesList = ({
           </Alert>
         </div>
       )}
+
+      <div className="mt-4 flex gap-4">
+        <button
+          onClick={onGeneratePDF}
+          disabled={isProcessing || !hasArticles}
+          className="flex-1 bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-8 py-4 rounded-xl font-semibold hover:from-indigo-700 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
+        >
+          <Download className="inline mr-2" size={20} />
+          {isProcessing ? 'Генерация...' : 'Сгенерировать PDF'}
+        </button>
+      </div>
 
       {hasUnreviewedArticles && hasArticles && (
         <div className="mt-4">
