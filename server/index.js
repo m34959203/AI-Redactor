@@ -25,7 +25,7 @@ import aiRoutes from './routes/ai.js';
 import dataRoutes from './routes/data.js';
 import webhookRoutes from './routes/webhooks.js';
 import socialMediaRoutes from './routes/socialMedia.js';
-import { testConnection } from './db/config.js';
+import pool, { testConnection } from './db/config.js';
 import { runMigrations, isDatabaseReady } from './db/migrate.js';
 
 console.log('=== Server module loading ===');
@@ -137,12 +137,28 @@ app.get('/api/health', async (req, res) => {
   console.log('Health check requested');
   const libreOfficeAvailable = await checkLibreOffice();
   const aiAvailable = !!(process.env.OPENROUTER_API_KEY || process.env.GROQ_API_KEY || process.env.GEMINI_API_KEY);
+
+  // Try to reconnect if database was not available at startup
+  let dbStatus = databaseAvailable;
+  let dbError = null;
+  if (!dbStatus && (process.env.DATABASE_URL || process.env.DB_HOST)) {
+    try {
+      const result = await pool.query('SELECT NOW()');
+      dbStatus = true;
+      databaseAvailable = true;
+    } catch (err) {
+      dbError = err.message;
+    }
+  }
+
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
     libreOffice: libreOfficeAvailable,
     ai: aiAvailable,
-    database: databaseAvailable
+    database: dbStatus,
+    ...(dbError && { databaseError: dbError }),
+    ...(process.env.DATABASE_URL && { databaseUrl: process.env.DATABASE_URL.replace(/:[^@]+@/, ':***@') })
   });
 });
 
