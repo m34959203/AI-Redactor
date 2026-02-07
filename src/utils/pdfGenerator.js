@@ -1122,28 +1122,28 @@ export const generatePDFSmart = async (issue, articles, coverPage, descriptionPa
 
   const serverStatus = await checkServerHealth();
 
-  if (!serverStatus.available) {
-    throw new Error('Сервер конвертации недоступен. Запустите сервер: cd server && npm start');
+  if (serverStatus.available && serverStatus.libreOffice) {
+    // Use server-side generation with LibreOffice (100% formatting accuracy)
+    console.log('Using server-side PDF generation (LibreOffice)');
+    onProgress({ step: 1, total: 5, message: 'Конвертация через LibreOffice...' });
+
+    const pdfBlob = await generateJournalPdf(
+      { coverPage, descriptionPage, articles, finalPage },
+      (progress) => onProgress({
+        step: progress.step + 1,
+        total: 5,
+        message: progress.message
+      })
+    );
+
+    return { blob: pdfBlob, method: 'server' };
   }
 
-  if (!serverStatus.libreOffice) {
-    throw new Error('LibreOffice не установлен на сервере. Установите: sudo apt install libreoffice');
-  }
+  // Fallback to client-side generation (no LibreOffice needed)
+  console.log('LibreOffice unavailable, using client-side PDF generation');
+  onProgress({ step: 1, total: 5, message: 'Генерация PDF в браузере...' });
 
-  // Use server-side generation with LibreOffice (100% formatting accuracy)
-  console.log('Using server-side PDF generation (LibreOffice)');
-  onProgress({ step: 1, total: 5, message: 'Конвертация через LibreOffice...' });
-
-  const pdfBlob = await generateJournalPdf(
-    { coverPage, descriptionPage, articles, finalPage },
-    (progress) => onProgress({
-      step: progress.step + 1,
-      total: 5,
-      message: progress.message
-    })
-  );
-
-  return { blob: pdfBlob, method: 'server' };
+  return await generatePDF(issue, articles, coverPage, descriptionPage, finalPage, onProgress);
 };
 
 /**
