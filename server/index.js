@@ -136,7 +136,7 @@ app.use((req, res, next) => {
 app.get('/api/health', async (req, res) => {
   console.log('Health check requested');
   const libreOfficeAvailable = await checkLibreOffice();
-  const aiAvailable = !!process.env.OPENROUTER_API_KEY;
+  const aiAvailable = !!(process.env.OPENROUTER_API_KEY || process.env.GROQ_API_KEY || process.env.GEMINI_API_KEY);
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
