@@ -39,7 +39,7 @@ const pool = new Pool({
   ...getDatabaseConfig(),
   max: 20, // Maximum number of clients in the pool
   idleTimeoutMillis: 30000, // Close idle clients after 30 seconds
-  connectionTimeoutMillis: 5000, // Return error after 5 seconds if connection fails
+  connectionTimeoutMillis: 30000, // 30s timeout for Neon.tech cold starts
 });
 
 // Test connection on startup
