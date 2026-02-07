@@ -162,6 +162,86 @@ app.get('/api/health', async (req, res) => {
   });
 });
 
+// Database diagnostic endpoint (temporary - for debugging connection issues)
+app.get('/api/diagnose-db', async (req, res) => {
+  const net = await import('net');
+  const results = { steps: [] };
+  const dbUrl = process.env.DATABASE_URL || '';
+  results.databaseUrlSet = !!dbUrl;
+  results.databaseUrl = dbUrl ? dbUrl.replace(/:[^@]+@/, ':***@') : 'NOT SET';
+
+  if (!dbUrl) {
+    results.steps.push('DATABASE_URL is not set');
+    return res.json(results);
+  }
+
+  // Parse host
+  let host, port;
+  try {
+    const url = new URL(dbUrl);
+    host = url.hostname;
+    port = parseInt(url.port) || 5432;
+    results.host = host;
+    results.port = port;
+  } catch (e) {
+    results.steps.push('URL parse error: ' + e.message);
+    return res.json(results);
+  }
+
+  // Test TCP connection
+  results.steps.push('Testing TCP connection to ' + host + ':' + port);
+  const tcpOk = await new Promise((resolve) => {
+    const s = net.createConnection(port, host, () => {
+      s.end();
+      resolve(true);
+    });
+    s.on('error', (e) => {
+      results.tcpError = e.message;
+      resolve(false);
+    });
+    s.setTimeout(15000, () => {
+      results.tcpError = 'TIMEOUT (port likely blocked by firewall)';
+      s.destroy();
+      resolve(false);
+    });
+  });
+  results.tcpConnected = tcpOk;
+
+  if (!tcpOk) {
+    // Try port 443
+    results.steps.push('Port ' + port + ' blocked, trying 443...');
+    const tcp443 = await new Promise((resolve) => {
+      const s = net.createConnection(443, host, () => {
+        s.end();
+        resolve(true);
+      });
+      s.on('error', () => resolve(false));
+      s.setTimeout(15000, () => { s.destroy(); resolve(false); });
+    });
+    results.port443Open = tcp443;
+    if (tcp443) {
+      results.steps.push('Port 443 is open. Need to use Neon serverless driver.');
+    }
+    return res.json(results);
+  }
+
+  // Test PostgreSQL connection
+  results.steps.push('TCP OK, testing PostgreSQL connection...');
+  try {
+    const result = await pool.query('SELECT NOW() as time, current_database() as db');
+    results.pgConnected = true;
+    results.pgTime = result.rows[0].time;
+    results.pgDatabase = result.rows[0].db;
+    results.steps.push('PostgreSQL connected successfully!');
+  } catch (e) {
+    results.pgConnected = false;
+    results.pgError = e.message;
+    results.steps.push('PostgreSQL error: ' + e.message);
+  }
+
+  res.json(results);
+});
+
 // AI Routes (proxy for OpenRouter API - keeps API key secure)
 app.use('/api/ai', aiRoutes);
 
