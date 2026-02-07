@@ -278,16 +278,43 @@ router.get('/providers', (req, res) => {
 /**
  * GET /api/ai/test
  * Test AI connection with a simple request
+ * Unlike extractMetadata, this does NOT swallow errors - it propagates them
  */
 router.get('/test', async (req, res) => {
   try {
-    const result = await aiService.extractMetadata('test.docx', 'Это тестовый текст для проверки AI.');
+    // Use analyzeArticle which returns needsReview=true on failure
+    const result = await aiService.analyzeArticle('test.docx', 'Это тестовый текст для проверки работы AI системы классификации научных статей.');
     const status = aiService.getStatus();
+    const metrics = aiService.getMetrics();
+
+    // Check if the result is actually a fallback (AI failed silently)
+    const isFallback = result.needsReview && result.sectionConfidence === 0 && result.author === 'Автор не указан';
+
+    if (isFallback && metrics.errors > 0) {
+      // AI returned fallback - check logs for actual error
+      const logs = aiService.getRequestLog(1);
+      const lastError = logs.entries?.[0]?.error || 'Unknown error';
+
+      return res.status(503).json({
+        success: false,
+        error: lastError,
+        code: 'AI_REQUEST_FAILED',
+        provider: status.primaryProvider,
+        suggestion: lastError.includes('API has not been used') || lastError.includes('disabled')
+          ? 'Enable Generative Language API in Google Cloud Console'
+          : 'Check API key and server logs'
+      });
+    }
 
     res.json({
       success: true,
       provider: status.primaryProvider,
-      result: result,
+      result: {
+        title: result.title,
+        author: result.author,
+        section: result.section,
+        confidence: result.sectionConfidence
+      },
       message: `AI service working via ${status.primaryProvider}`
     });
   } catch (error) {
@@ -298,7 +325,7 @@ router.get('/test', async (req, res) => {
         success: false,
         error: 'No API key configured',
         code: 'API_KEY_MISSING',
-        suggestion: 'Set GROQ_API_KEY or OPENROUTER_API_KEY'
+        suggestion: 'Set GEMINI_API_KEY, GROQ_API_KEY or OPENROUTER_API_KEY'
       });
     }
     if (error.message === 'API_KEY_INVALID') {
