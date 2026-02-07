@@ -6,9 +6,10 @@
   "description": "AI-powered scientific journal editor with automatic article processing",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && mkdir -p server/public && cp -r dist/* server/public/",
     "preview": "vite preview",
-    "start": "serve -s dist -l $PORT",
+    "start": "node server/index.js",
+    "postinstall": "cd server && npm install",
     "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0"
   },
   "dependencies": {
