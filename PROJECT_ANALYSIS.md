@@ -223,7 +223,9 @@ const addSectionHeader = (doc, sectionName, pageNum) => {
 
 ## 5. Заключение
 
-### Статус проекта: ✅ ГОТОВ К ПРИЁМКЕ
+### Статус проекта: ✅ ГОТОВ К ПРИЁМКЕ / РАЗВЁРНУТ В PRODUCTION
+
+**Production URL:** [https://airesume.zhezu.kz](https://airesume.zhezu.kz) — субдомен Жезказганского университета имени О.А. Байконурова (г. Жезказган, Республика Казахстан).
 
 Все требования ТЗ выполнены:
 
@@ -244,7 +246,7 @@ const addSectionHeader = (doc, sectionName, pageNum) => {
 - ✅ Серверная генерация PDF с LibreOffice
 - ✅ Клиентская генерация PDF с jsPDF
 
-**Рекомендация:** Проект готов к production-использованию.
+**Рекомендация:** Проект развёрнут в production по адресу [airesume.zhezu.kz](https://airesume.zhezu.kz) и используется для сборки научного журнала «Вестник ЖезУ».
 
 ---
 
