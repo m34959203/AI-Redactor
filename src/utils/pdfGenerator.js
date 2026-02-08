@@ -1114,7 +1114,7 @@ export const downloadPDF = (pdfBlob, fileName) => {
  * @param {Object} descriptionPage - Description page data
  * @param {Object} finalPage - Final page data
  * @param {Function} onProgress - Progress callback
- * @returns {Promise<{blob: Blob, method: 'server'}>}
+ * @returns {Promise<{blob: Blob, method: string}>}
  */
 export const generatePDFSmart = async (issue, articles, coverPage, descriptionPage, finalPage, onProgress = () => {}) => {
   // Check if server is available
@@ -1143,7 +1143,8 @@ export const generatePDFSmart = async (issue, articles, coverPage, descriptionPa
   console.log('LibreOffice unavailable, using client-side PDF generation');
   onProgress({ step: 1, total: 5, message: 'Генерация PDF в браузере...' });
 
-  return await generatePDF(issue, articles, coverPage, descriptionPage, finalPage, onProgress);
+  const pdfBlob = await generatePDF(issue, articles, coverPage, descriptionPage, finalPage, onProgress);
+  return { blob: pdfBlob, method: 'client' };
 };
 
 /**
